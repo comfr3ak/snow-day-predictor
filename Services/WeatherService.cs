@@ -128,6 +128,7 @@ namespace SnowDayPredictor.Services
                 });
             }
 
+
             Console.WriteLine($"Generated {results.Count} forecast days");
 
             // Apply multi-day closure logic for snow-intolerant regions
