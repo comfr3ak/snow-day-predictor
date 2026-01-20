@@ -366,84 +366,20 @@ namespace SnowDayPredictor.Services
 
         public async Task<(string cityName, string state)> GetCityNameFromZip(string zipCode)
         {
+            // Try 1: Census.gov (most reliable, government source)
             try
             {
-                // Try zippopotam.us first
-                var url = $"https://api.zippopotam.us/us/{zipCode}";
-
-                Console.WriteLine($"Fetching city name from: {url}");
-
-                _httpClient.DefaultRequestHeaders.Clear();
-                _httpClient.DefaultRequestHeaders.Add("User-Agent", "SnowDayPredictor/1.0");
-
-                var response = await _httpClient.GetAsync(url);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    var content = await response.Content.ReadAsStringAsync();
-                    Console.WriteLine($"Zippopotam response: {content}");
-
-                    using var doc = System.Text.Json.JsonDocument.Parse(content);
-                    var root = doc.RootElement;
-
-                    if (root.TryGetProperty("places", out var places))
-                    {
-                        if (places.GetArrayLength() > 0)
-                        {
-                            var place = places[0];
-
-                            string? city = null;
-                            string? state = null;
-                            string? stateAbbr = null;
-
-                            if (place.TryGetProperty("place name", out var placeNameElement))
-                            {
-                                city = placeNameElement.GetString();
-                                Console.WriteLine($"Found city: {city}");
-                            }
-
-                            if (place.TryGetProperty("state", out var stateElement))
-                            {
-                                state = stateElement.GetString();
-                                Console.WriteLine($"Found state: {state}");
-                            }
-
-                            if (place.TryGetProperty("state abbreviation", out var stateAbbrElement))
-                            {
-                                stateAbbr = stateAbbrElement.GetString();
-                                Console.WriteLine($"Found state abbr: {stateAbbr}");
-                            }
-
-                            if (!string.IsNullOrEmpty(city) && !string.IsNullOrEmpty(stateAbbr))
-                            {
-                                return ($"{city}, {stateAbbr}", stateAbbr);
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    Console.WriteLine($"Zippopotam failed with status: {response.StatusCode}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Zippopotam error: {ex.Message}");
-            }
-
-            // Fallback: Try Census.gov geocoder
-            try
-            {
-                Console.WriteLine("Trying Census.gov fallback...");
+                Console.WriteLine("Trying Census.gov geocoder...");
 
                 var censusUrl = $"https://geocoding.geo.census.gov/geocoder/locations/address?zip={zipCode}&benchmark=2020&format=json";
 
                 var censusResponse = await _httpClient.GetAsync(censusUrl);
+                Console.WriteLine($"Census status: {censusResponse.StatusCode}");
 
                 if (censusResponse.IsSuccessStatusCode)
                 {
                     var content = await censusResponse.Content.ReadAsStringAsync();
-                    Console.WriteLine($"Census response: {content.Substring(0, Math.Min(500, content.Length))}");
+                    Console.WriteLine($"Census response: {content.Substring(0, Math.Min(300, content.Length))}");
 
                     using var doc = System.Text.Json.JsonDocument.Parse(content);
                     var root = doc.RootElement;
@@ -466,7 +402,7 @@ namespace SnowDayPredictor.Services
 
                                 if (!string.IsNullOrEmpty(city) && !string.IsNullOrEmpty(state))
                                 {
-                                    Console.WriteLine($"Census found: {city}, {state}");
+                                    Console.WriteLine($"✓ Census success: {city}, {state}");
                                     return ($"{city}, {state}", state);
                                 }
                             }
@@ -476,12 +412,132 @@ namespace SnowDayPredictor.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Census fallback error: {ex.Message}");
+                Console.WriteLine($"✗ Census error: {ex.Message}");
             }
 
-            // Last resort: just return ZIP code
-            Console.WriteLine($"All lookups failed, returning ZIP: {zipCode}");
-            return (zipCode, "");
+            // Try 2: Zippopotam.us (backup)
+            try
+            {
+                Console.WriteLine("Trying Zippopotam.us...");
+
+                var url = $"https://api.zippopotam.us/us/{zipCode}";
+
+                var response = await _httpClient.GetAsync(url);
+                Console.WriteLine($"Zippopotam status: {response.StatusCode}");
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine($"Zippopotam response: {content.Substring(0, Math.Min(300, content.Length))}");
+
+                    using var doc = System.Text.Json.JsonDocument.Parse(content);
+                    var root = doc.RootElement;
+
+                    if (root.TryGetProperty("places", out var places) && places.GetArrayLength() > 0)
+                    {
+                        var place = places[0];
+
+                        string? city = null;
+                        string? stateAbbr = null;
+
+                        if (place.TryGetProperty("place name", out var placeNameElement))
+                            city = placeNameElement.GetString();
+
+                        if (place.TryGetProperty("state abbreviation", out var stateAbbrElement))
+                            stateAbbr = stateAbbrElement.GetString();
+
+                        if (!string.IsNullOrEmpty(city) && !string.IsNullOrEmpty(stateAbbr))
+                        {
+                            Console.WriteLine($"✓ Zippopotam success: {city}, {stateAbbr}");
+                            return ($"{city}, {stateAbbr}", stateAbbr);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"✗ Zippopotam error: {ex.Message}");
+            }
+
+            // Fallback: Use ZIP prefix to at least get the state
+            var stateFromZip = GetStateFromZipPrefix(zipCode);
+            if (!string.IsNullOrEmpty(stateFromZip))
+            {
+                Console.WriteLine($"✓ Using ZIP prefix fallback: {zipCode} → {stateFromZip}");
+                return ($"ZIP {zipCode}", stateFromZip);
+            }
+
+            // Complete failure - return ZIP with no state
+            Console.WriteLine($"✗ All lookups failed for ZIP: {zipCode}");
+            return ($"ZIP {zipCode}", "");
+        }
+
+        private string GetStateFromZipPrefix(string zipCode)
+        {
+            if (zipCode.Length < 3) return "";
+
+            var prefix = int.Parse(zipCode.Substring(0, 3));
+
+            // ZIP code ranges by state (simplified)
+            return prefix switch
+            {
+                >= 010 and <= 027 => "MA",
+                >= 028 and <= 029 => "RI",
+                >= 030 and <= 038 => "NH",
+                >= 039 and <= 049 => "ME",
+                >= 050 and <= 059 => "VT",
+                >= 060 and <= 069 => "CT",
+                >= 070 and <= 089 => "NJ",
+                >= 100 and <= 149 => "NY",
+                >= 150 and <= 196 => "PA",
+                >= 197 and <= 199 => "DE",
+                >= 200 and <= 205 => "DC",
+                >= 206 and <= 219 => "MD",
+                >= 220 and <= 246 => "VA",
+                >= 247 and <= 268 => "WV",
+                >= 270 and <= 289 => "NC",
+                >= 290 and <= 299 => "SC",
+                >= 300 and <= 319 => "GA",
+                >= 320 and <= 349 => "FL",
+                >= 350 and <= 369 => "AL",
+                >= 370 and <= 385 => "TN",
+                >= 386 and <= 397 => "MS",
+                >= 398 and <= 399 => "GA",
+                >= 400 and <= 427 => "KY",
+                >= 430 and <= 458 => "OH",
+                >= 460 and <= 479 => "IN",
+                >= 480 and <= 499 => "MI",
+                >= 500 and <= 528 => "IA",
+                >= 530 and <= 549 => "WI",
+                >= 550 and <= 567 => "MN",
+                >= 570 and <= 577 => "SD",
+                >= 580 and <= 588 => "ND",
+                >= 590 and <= 599 => "MT",
+                >= 600 and <= 620 => "IL",
+                >= 622 and <= 629 => "IL",
+                >= 630 and <= 658 => "MO",
+                >= 660 and <= 679 => "KS",
+                >= 680 and <= 693 => "NE",
+                >= 700 and <= 714 => "LA",
+                >= 716 and <= 729 => "AR",
+                >= 730 and <= 749 => "OK",
+                >= 750 and <= 799 => "TX",
+                >= 800 and <= 816 => "CO",
+                >= 820 and <= 831 => "WY",
+                >= 832 and <= 838 => "ID",
+                >= 840 and <= 847 => "UT",
+                >= 850 and <= 865 => "AZ",
+                >= 870 and <= 884 => "NM",
+                >= 885 and <= 898 => "TX",
+                >= 889 and <= 899 => "NV",
+                >= 900 and <= 961 => "CA",
+                >= 962 and <= 966 => "HI",
+                >= 967 and <= 969 => "HI",
+                >= 970 and <= 979 => "OR",
+                >= 980 and <= 994 => "WA",
+                >= 995 and <= 999 => "AK",
+                _ => ""
+            };
         }
 
         public async Task<(string cityName, string state)> GetCityNameFromCoordinates(double lat, double lon)
