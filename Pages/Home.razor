@@ -1,0 +1,611 @@
+﻿@page "/"
+@using SnowDayPredictor.Services
+@using SnowDayPredictor.Models
+@using SnowDayPredictor.Pages
+@inject WeatherService WeatherService
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Snow Day Predictor</PageTitle>
+
+<div class="container">
+    <div class="main-content">
+        <h1>❄️ Snow Day Predictor</h1>
+
+        <p>Enter your ZIP code to see the chance of snow days in your area over the next week.</p>
+
+        <SavedLocations locations="@savedLocations"
+                        OnLocationSelected="@LoadSavedLocation"
+                        OnLocationDeleted="@DeleteSavedLocation" />
+
+        <div class="input-section mb-4">
+            <div class="zip-input-group">
+                <button class="btn btn-outline-secondary btn-sm location-btn"
+                        @onclick="UseMyLocation"
+                        disabled="@isLoading"
+                        title="Use my current location">
+                    📍
+                </button>
+                <input type="text"
+                       class="form-control"
+                       @bind="zipCode"
+                       @bind:event="oninput"
+                       placeholder="Enter ZIP code"
+                       maxlength="5"
+                       @onkeydown="HandleKeyPress" />
+                <button class="btn btn-primary" @onclick="() => GetForecast()" disabled="@isLoading">
+                    @if (isLoading)
+                    {
+                        <span>Loading...</span>
+                    }
+                    else
+                    {
+                        <span>Get Forecast</span>
+                    }
+                </button>
+                <button class="btn btn-outline-secondary"
+                        @onclick="() => RefreshForecast()"
+                        disabled="@isLoading"
+                        title="Force refresh forecast (bypasses 5-min cache)">
+                    🔄
+                </button>
+            </div>
+        </div>
+
+            @if (errorMessage != null)
+            {
+                <div class="alert alert-danger">@errorMessage</div>
+            }
+
+            @if (forecasts != null && forecasts.Any())
+            {
+                <div class="forecast-title">
+                    <h3>7-Day Snow Day Forecast</h3>
+                    @if (!string.IsNullOrEmpty(currentCityName))
+                    {
+                        <p class="location-name">📍 @currentCityName</p>
+                    }
+                </div>
+
+                @if (cacheTime.HasValue)
+                {
+                    <div class="last-updated">
+                        Updated: @cacheTime.Value.ToString("h:mm tt")
+                        <br />
+                        <small class="text-muted">Cached for 5 min</small>
+                    </div>
+                }            
+       
+             <div class="forecast-container">
+    @foreach (var forecast in forecasts)
+    {
+        <div class="forecast-card" style="border-left: 4px solid @forecast.ChanceColor">
+            <div class="forecast-header">
+                <h4>@forecast.DayName</h4>
+                <span class="date">@forecast.Date.ToString("MMM dd")</span>
+            </div>
+            
+            <!-- Closure Chance -->
+            <div class="snow-chance" style="border-color: @forecast.ChanceColor">
+                <div class="chance-type">CLOSURE</div>
+                <div class="percentage" style="color: @forecast.ChanceColor">@forecast.SnowDayChance%</div>
+                <div class="chance-label">@forecast.ChanceLevel Chance</div>
+            </div>
+            
+            <!-- Delay Chance -->
+            <div class="delay-chance" style="border-color: @forecast.DelayColor">
+                <div class="chance-type">DELAY</div>
+                <div class="percentage" style="color: @forecast.DelayColor">@forecast.DelayChance%</div>
+                <div class="chance-label">@forecast.DelayLevel Chance</div>
+            </div>
+            
+            <div class="forecast-details">
+                <div><strong>Temperature:</strong> @forecast.Temperature°F</div>
+                <div><strong>Precipitation:</strong> @forecast.PrecipitationChance%</div>
+                @if (!string.IsNullOrEmpty(forecast.SnowfallAmount))
+                {
+                    <div>
+                        <strong>❄️ Expected Snow:</strong> 
+                        @if (forecast.SnowfallAmount.Contains("\""))
+                        {
+                            <span>@forecast.SnowfallAmount</span>
+                        }
+                        else
+                        {
+                            <span class="qualitative-snow">@forecast.SnowfallAmount amounts</span>
+                        }
+                    </div>
+                }
+                <div class="mt-2"><strong>Forecast:</strong> @forecast.Forecast</div>
+            </div>
+        </div>
+    }
+</div>
+            }        
+    </div>
+</div>
+
+@code {
+    private string zipCode = "";
+    private string currentCityName = "";
+    private bool isLoading = false;
+    private string? errorMessage = null;
+    private List<SnowDayForecast>? forecasts = null;
+    private List<SavedLocation> savedLocations = new();
+    private const int MaxSavedLocations = 5;
+
+    // Cache management
+    private string? cachedZipCode = null;
+    private DateTime? cacheTime = null;
+    private const int CacheMinutes = 5;
+    private bool IsCacheValid => cachedZipCode == zipCode &&
+                                 cacheTime.HasValue &&
+                                 DateTime.Now.Subtract(cacheTime.Value).TotalMinutes < CacheMinutes;
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSavedLocations();
+
+        // Auto-load the most recently used location
+        var lastLocation = savedLocations.FirstOrDefault();
+        if (lastLocation != null)
+        {
+            zipCode = lastLocation.ZipCode;
+            await GetForecast();
+        }
+    }
+
+    private async Task RefreshForecast()
+    {
+        if (string.IsNullOrEmpty(zipCode))
+        {
+            errorMessage = "No location to refresh. Please enter a ZIP code or select a saved location.";
+            return;
+        }
+
+        // Force refresh bypasses cache
+        await GetForecast(forceRefresh: true);
+    }
+
+    private async Task LoadSavedLocations()
+    {
+        try
+        {
+            var stored = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "savedLocations");
+            if (!string.IsNullOrEmpty(stored))
+            {
+                savedLocations = System.Text.Json.JsonSerializer.Deserialize<List<SavedLocation>>(stored) ?? new();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading saved locations: {ex.Message}");
+        }
+    }
+
+    private async Task SaveLocations()
+    {
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(savedLocations);
+            await JSRuntime.InvokeVoidAsync("localStorage.setItem", "savedLocations", json);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error saving locations: {ex.Message}");
+        }
+    }
+
+    private async Task AddOrUpdateSavedLocation(string zip, string cityName, bool updateLastUsed = true)
+    {
+        var existing = savedLocations.FirstOrDefault(l => l.ZipCode == zip);
+        if (existing != null)
+        {
+            existing.CityName = cityName; // Update city name
+            if (updateLastUsed)
+            {
+                existing.LastUsed = DateTime.Now;
+            }
+        }
+        else
+        {
+            savedLocations.Insert(0, new SavedLocation
+            {
+                ZipCode = zip,
+                CityName = cityName,
+                LastUsed = DateTime.Now
+            });
+
+            // Keep only the most recent locations
+            if (savedLocations.Count > MaxSavedLocations)
+            {
+                savedLocations = savedLocations.Take(MaxSavedLocations).ToList();
+            }
+        }
+
+        // Only sort when adding new locations, not when reloading existing ones
+        if (updateLastUsed)
+        {
+            savedLocations = savedLocations.OrderByDescending(l => l.LastUsed).ToList();
+        }
+
+        await SaveLocations();
+    }
+
+    private async Task DeleteSavedLocation(string zip)
+    {
+        savedLocations.RemoveAll(l => l.ZipCode == zip);
+        await SaveLocations();
+    }
+
+    private async Task LoadSavedLocation(string locationCode)
+    {
+        // Only handle regular ZIP codes (we filtered out LOC: entries)
+        zipCode = locationCode;
+        await GetForecast();
+    }
+
+    private async Task GetForecast(bool forceRefresh = false)
+    {
+        if (string.IsNullOrWhiteSpace(zipCode) || zipCode.Length != 5 || !zipCode.All(char.IsDigit))
+        {
+            errorMessage = "Please enter a valid 5-digit ZIP code.";
+            return;
+        }
+
+        // Check cache first
+        if (!forceRefresh && IsCacheValid)
+        {
+            var minutesRemaining = CacheMinutes - DateTime.Now.Subtract(cacheTime!.Value).TotalMinutes;
+            errorMessage = $"Using cached data. Refresh available in {Math.Ceiling(minutesRemaining)} minute(s).";
+            return;
+        }
+
+        errorMessage = null;
+        forecasts = null;
+        isLoading = true;
+
+        try
+        {
+            // Step 1: Convert ZIP to coordinates
+            var coords = await WeatherService.GetCoordinatesFromZip(zipCode);
+            if (coords == null)
+            {
+                errorMessage = "Could not find location for that ZIP code. Please try another.";
+                return;
+            }
+
+            // Get city name and state
+            var (cityName, state) = await WeatherService.GetCityNameFromZip(zipCode);
+            currentCityName = cityName;
+            Console.WriteLine($"City: {cityName}, State: {state}");
+
+            // Step 2: Get weather forecast
+            var weatherData = await WeatherService.GetWeatherForecast(coords.Value.lat, coords.Value.lon);
+            if (weatherData == null)
+            {
+                errorMessage = "Could not retrieve weather data. The National Weather Service API may be temporarily unavailable.";
+                return;
+            }
+
+            // Step 3: Create geography context
+            var geography = new GeographyContext
+            {
+                State = state,
+                Latitude = coords.Value.lat
+            };
+
+            // Step 4: Calculate snow day chances
+            forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography);
+
+            if (!forecasts.Any())
+            {
+                errorMessage = "No forecast data available for your location.";
+            }
+            else
+            {
+                // Only save if it's a new location (not already in saved list)
+                if (!savedLocations.Any(l => l.ZipCode == zipCode))
+                {
+                    await AddOrUpdateSavedLocation(zipCode, currentCityName);
+                }
+
+                // Update cache
+                cachedZipCode = zipCode;
+                cacheTime = DateTime.Now;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"An error occurred: {ex.Message}";
+            Console.WriteLine($"Error: {ex}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            InvalidateCacheIfNeeded();
+            await Task.Delay(10);
+            await GetForecast();
+        }
+    }
+
+    private async Task UseMyLocation()
+    {
+        errorMessage = null;
+        forecasts = null;
+        isLoading = true;
+
+        try
+        {
+            var module = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./Pages/Home.razor.js");
+
+            try
+            {
+                var position = await module.InvokeAsync<GeolocationPosition>("getLocation");
+
+                Console.WriteLine($"Got location: {position.Latitude}, {position.Longitude}");
+
+                // Get city name from coordinates
+                var (cityName, state) = await WeatherService.GetCityNameFromCoordinates(position.Latitude, position.Longitude);
+                currentCityName = cityName;
+                Console.WriteLine($"City from location: {currentCityName}, State: {state}");
+
+                var weatherData = await WeatherService.GetWeatherForecast(position.Latitude, position.Longitude);
+                if (weatherData == null)
+                {
+                    errorMessage = "Could not retrieve weather data for your location.";
+                    return;
+                }
+
+                // Create geography context
+                var geography = new GeographyContext
+                {
+                    State = state,
+                    Latitude = position.Latitude
+                };
+
+                forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography);
+
+                if (!forecasts.Any())
+                {
+                    errorMessage = "No forecast data available for your location.";
+                }
+                else
+                {
+                    // Clear ZIP since we used coordinates
+                    // Don't save location-based searches since they can't be reloaded
+                    zipCode = "";
+                }
+            }
+            catch (JSException jsEx)
+            {
+                Console.WriteLine($"JS Error: {jsEx.Message}");
+                errorMessage = jsEx.Message.Contains("denied")
+                    ? "Location permission denied. Please enable location access or enter your ZIP code."
+                    : $"Could not get your location: {jsEx.Message}";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Location error: {ex.Message}. Try entering your ZIP code instead.";
+            Console.WriteLine($"Geolocation error: {ex}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void InvalidateCacheIfNeeded()
+    {
+        // Clear cache if user changed the ZIP code
+        if (cachedZipCode != zipCode)
+        {
+            cachedZipCode = null;
+            cacheTime = null;
+        }
+    }
+
+    public class GeolocationPosition
+    {
+        public double Latitude { get; set; }
+        public double Longitude { get; set; }
+    }
+}
+
+<style>
+    .input-section {
+        max-width: 600px;
+    }
+
+    .zip-input-group {
+        display: flex;
+        gap: 0.5rem;
+        align-items: stretch;
+    }
+
+        .zip-input-group .form-control {
+            flex: 1;
+        }
+
+    .location-btn {
+        padding: 0.375rem 0.75rem;
+        font-size: 1.2rem;
+        line-height: 1;
+        border: 1px solid #dee2e6;
+    }
+
+        .location-btn:hover {
+            background-color: #e9ecef;
+        }
+
+    .forecast-container {
+        display: grid;
+        gap: 1rem;
+        margin-top: 1.5rem;
+    }
+
+    .forecast-card {
+        background: white;
+        border-radius: 8px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .forecast-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+
+        .forecast-header h4 {
+            margin: 0;
+            font-size: 1.25rem;
+        }
+
+    .date {
+        color: #666;
+        font-size: 0.9rem;
+    }
+
+    .snow-chance {
+        text-align: center;
+        padding: 1rem;
+        margin: 1rem 0;
+        background: #f8f9fa;
+        border-radius: 8px;
+    }
+
+    .percentage {
+        font-size: 3rem;
+        font-weight: bold;
+        line-height: 1;
+    }
+
+    .chance-label {
+        font-size: 1rem;
+        margin-top: 0.5rem;
+        font-weight: 600;
+    }
+
+    .forecast-details {
+        color: #333;
+        font-size: 0.95rem;
+        line-height: 1.6;
+    }
+
+        .forecast-details > div {
+            margin-bottom: 0.5rem;
+        }
+
+    .forecast-title {
+        margin-bottom: 1rem;
+    }
+
+        .forecast-title h3 {
+            margin-bottom: 0.5rem;
+        }
+
+    .location-name {
+        font-size: 1.1rem;
+        color: #666;
+        margin: 0;
+    }
+
+    .container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 1rem;
+    }
+
+    .main-content {
+        background: white;
+        padding: 2rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    @@media (max-width: 768px) {
+        .main-content {
+            padding: 1rem;
+        }
+
+        .container {
+            padding: 0.5rem;
+        }
+    }
+
+    .title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 1rem;
+    }
+
+    .last-updated {
+        font-size: 0.85rem;
+        color: #999;
+        text-align: right;
+        margin-top: 0.5rem;
+    }
+
+    .btn-outline-secondary {
+        white-space: nowrap;
+    }
+
+    .qualitative-snow {
+        font-style: italic;
+        color: #666;
+    }
+
+    .snow-chance {
+        text-align: center;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border: 2px solid;
+    }
+
+    .delay-chance {
+        text-align: center;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        background: #f0f8ff;
+        border-radius: 8px;
+        border: 2px solid;
+    }
+
+    .chance-type {
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 1px;
+        color: #666;
+        margin-bottom: 0.25rem;
+    }
+
+    .percentage {
+        font-size: 2.5rem;
+        font-weight: bold;
+        line-height: 1;
+    }
+
+    .chance-label {
+        font-size: 0.9rem;
+        margin-top: 0.5rem;
+        font-weight: 600;
+    }
+
+    .qualitative-snow {
+        font-style: italic;
+        color: #666;
+    }
+</style>

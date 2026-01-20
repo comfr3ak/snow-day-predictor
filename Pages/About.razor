@@ -1,0 +1,91 @@
+﻿@page "/about"
+
+<PageTitle>About - Snow Day Predictor</PageTitle>
+
+<div class="container">
+    <div class="main-content">
+        <h1>About Snow Day Predictor</h1>
+
+        <p>Snow Day Predictor helps you estimate the likelihood of school closures or delays due to winter weather.</p>
+
+        <h3>How It Works</h3>
+        <p>Our algorithm analyzes weather forecasts from the National Weather Service and calculates snow day probabilities based on:</p>
+        <ul>
+            <li><strong>Temperature:</strong> Below-freezing conditions increase the chance of snow accumulation</li>
+            <li><strong>Precipitation Type:</strong> Snow, sleet, and freezing rain predictions</li>
+            <li><strong>Precipitation Probability:</strong> Higher chances mean more likely accumulation</li>
+            <li><strong>Forecast Severity:</strong> Keywords like "heavy snow" or "blizzard" boost probabilities</li>
+            <li><strong>Timing:</strong> Overnight and early morning conditions are weighted more heavily</li>
+        </ul>
+
+        <h3>Data Sources</h3>
+        <p>Weather data is provided by:</p>
+        <ul>
+            <li><strong>National Weather Service (NOAA):</strong> Official forecast data</li>
+            <li><strong>Zippopotam.us:</strong> ZIP code to city name lookup</li>
+            <li><strong>OpenStreetMap Nominatim:</strong> Geocoding services</li>
+        </ul>
+
+        <h3>Disclaimer</h3>
+        <p class="text-muted">
+            Snow Day Predictor is for informational and entertainment purposes only.
+            Actual school closures depend on many factors including local policies, road conditions,
+            and administrator decisions. Always check official sources for school closure announcements.
+        </p>
+
+        <h3>Privacy</h3>
+        <p>
+            Your saved locations are stored locally in your browser. No personal data is sent to external servers
+            except for public weather API requests. Location data (if you choose to share it) is only used to
+            fetch weather forecasts and is not stored or transmitted elsewhere.
+        </p>
+
+        <div class="mt-4">
+            <a href="/" class="btn btn-primary">← Back to Forecast</a>
+        </div>
+    </div>
+</div>
+
+<style>
+    .container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 1rem;
+    }
+
+    .main-content {
+        background: white;
+        padding: 2rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    h3 {
+        margin-top: 1.5rem;
+        margin-bottom: 1rem;
+        color: #333;
+    }
+
+    ul {
+        margin-bottom: 1rem;
+    }
+
+    li {
+        margin-bottom: 0.5rem;
+    }
+
+    .text-muted {
+        color: #6c757d;
+        font-style: italic;
+    }
+
+    @@media (max-width: 768px) {
+        .main-content {
+            padding: 1rem;
+        }
+
+        .container {
+            padding: 0.5rem;
+        }
+    }
+</style>
