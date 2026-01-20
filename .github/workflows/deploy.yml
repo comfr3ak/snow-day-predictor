@@ -18,7 +18,7 @@ jobs:
           dotnet-version: 8.0.x
           
       - name: Publish
-        run: dotnet publish SnowDayPredictor/SnowDayPredictor.csproj -c Release -o release --nologo
+        run: dotnet publish SnowDayPredictor.csproj -c Release -o release --nologo
         
       - name: Change base tag
         run: sed -i 's/<base href="\/" \/>/<base href="\/snow-day-predictor\/" \/>/g' release/wwwroot/index.html
