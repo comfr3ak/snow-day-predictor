@@ -6,38 +6,99 @@
     <div class="main-content">
         <h1>About Snow Day Predictor</h1>
 
-        <p>Snow Day Predictor helps you estimate the likelihood of school closures or delays due to winter weather.</p>
+        <p>Snow Day Predictor helps you estimate the likelihood of school closures and delays due to winter weather, with geography-aware calculations that account for regional snow tolerance.</p>
 
         <h3>How It Works</h3>
-        <p>Our algorithm analyzes weather forecasts from the National Weather Service and calculates snow day probabilities based on:</p>
+        <p>Our advanced algorithm analyzes weather forecasts and calculates both <strong>closure</strong> and <strong>delay</strong> probabilities based on multiple factors:</p>
+
+        <h4>Weather Conditions Analyzed:</h4>
         <ul>
-            <li><strong>Temperature:</strong> Below-freezing conditions increase the chance of snow accumulation</li>
-            <li><strong>Precipitation Type:</strong> Snow, sleet, and freezing rain predictions</li>
-            <li><strong>Precipitation Probability:</strong> Higher chances mean more likely accumulation</li>
-            <li><strong>Forecast Severity:</strong> Keywords like "heavy snow" or "blizzard" boost probabilities</li>
-            <li><strong>Timing:</strong> Overnight and early morning conditions are weighted more heavily</li>
+            <li><strong>Temperature:</strong> Below-freezing conditions increase accumulation likelihood and dangerous road conditions</li>
+            <li><strong>Snowfall Amount:</strong> Expected accumulation in inches (when available from NWS forecasts)</li>
+            <li><strong>Precipitation Type:</strong> Snow, sleet, freezing rain, and wintry mix predictions</li>
+            <li><strong>Precipitation Probability:</strong> Higher chances mean more reliable forecasts</li>
+            <li><strong>Overnight Conditions:</strong> Snow or ice the night before significantly impacts morning commute safety</li>
+            <li><strong>Forecast Severity:</strong> Keywords like "heavy snow," "blizzard," or "freezing rain" boost probabilities</li>
+        </ul>
+
+        <h4>Geography-Aware Intelligence:</h4>
+        <p>The algorithm adjusts predictions based on your location's snow tolerance:</p>
+        <ul>
+            <li><strong>Southern States</strong> (FL, GA, SC, AL, MS, LA, TX, AR): Very low snow tolerance - even 1-2 inches can trigger closures. Schools may remain closed for 2-3 days after a winter event.</li>
+            <li><strong>Mid-South</strong> (NC, TN, KY, VA, WV): Low to moderate tolerance - closures likely with 3+ inches. May see 1-2 day closures for significant events.</li>
+            <li><strong>Mid-Atlantic/Lower Midwest</strong> (MD, DE, NJ, PA, OH, IN, MO): Moderate tolerance - 4-6 inches typically needed for closures.</li>
+            <li><strong>Northeast/Upper Midwest</strong> (NY, New England, MI, WI, IL, MN): High tolerance - schools operate in moderate snow, closures mainly for 8+ inches or blizzard conditions.</li>
+            <li><strong>Mountain/Northern States</strong> (MT, WY, CO, ID, ND, SD, AK): Very high tolerance - closures rare except for extreme conditions.</li>
+        </ul>
+
+        <h4>Closure vs. Delay:</h4>
+        <ul>
+            <li><strong>Closures:</strong> Full school cancellations, typically for significant accumulation, dangerous temperatures, or when road conditions are unsafe</li>
+            <li><strong>Delays:</strong> 1-2 hour delays for marginal conditions, light accumulation, or when road crews need extra time to clear routes. Often used when overnight weather improves by morning.</li>
+        </ul>
+
+        <h4>Multi-Day Impact:</h4>
+        <p>In regions with low snow tolerance, a major winter event can cause closures for multiple consecutive days as:</p>
+        <ul>
+            <li>Roads remain uncleared or dangerous</li>
+            <li>Refreezing occurs overnight</li>
+            <li>Limited snow removal equipment availability</li>
         </ul>
 
         <h3>Data Sources</h3>
         <p>Weather data is provided by:</p>
         <ul>
-            <li><strong>National Weather Service (NOAA):</strong> Official forecast data</li>
-            <li><strong>Zippopotam.us:</strong> ZIP code to city name lookup</li>
-            <li><strong>OpenStreetMap Nominatim:</strong> Geocoding services</li>
+            <li><strong>National Weather Service (NOAA):</strong> Official forecast data and winter weather advisories</li>
+            <li><strong>Zippopotam.us:</strong> ZIP code to city/state lookup</li>
+            <li><strong>OpenStreetMap Nominatim:</strong> Geocoding and reverse geocoding services</li>
+        </ul>
+
+        <h3>Accuracy & Limitations</h3>
+        <p>While our algorithm considers many factors, please note:</p>
+        <ul>
+            <li>Predictions are based on weather <strong>forecasts</strong>, which can change</li>
+            <li>Local road conditions, staffing, and district policies vary significantly</li>
+            <li>Rural vs. urban areas within the same district may have different impacts</li>
+            <li>The algorithm provides <strong>probability estimates</strong>, not certainties</li>
+            <li>Forecast accuracy decreases beyond 3-4 days out</li>
+        </ul>
+
+        <h3>Technology</h3>
+        <p>Snow Day Predictor is built with:</p>
+        <ul>
+            <li><strong>Blazor WebAssembly:</strong> Modern C# web framework running entirely in your browser</li>
+            <li><strong>.NET 8:</strong> Microsoft's latest application platform</li>
+            <li><strong>Client-side caching:</strong> Reduces API calls and respects rate limits (5-minute cache)</li>
+            <li><strong>Browser localStorage:</strong> Saves your favorite locations locally on your device</li>
         </ul>
 
         <h3>Disclaimer</h3>
-        <p class="text-muted">
-            Snow Day Predictor is for informational and entertainment purposes only.
-            Actual school closures depend on many factors including local policies, road conditions,
-            and administrator decisions. Always check official sources for school closure announcements.
+        <p class="disclaimer">
+            Snow Day Predictor is for <strong>informational and entertainment purposes only</strong>.
+            Actual school closures and delays depend on many factors including local policies, road conditions,
+            administrator decisions, bus routes, and real-time weather developments. The percentages shown are
+            <strong>estimates based on historical patterns and current forecasts</strong>, not official predictions.
+            <br><br>
+            <strong>Always check official sources</strong> for school closure announcements, including your school district's
+            website, local news, and emergency notification systems.
         </p>
 
         <h3>Privacy</h3>
         <p>
-            Your saved locations are stored locally in your browser. No personal data is sent to external servers
-            except for public weather API requests. Location data (if you choose to share it) is only used to
-            fetch weather forecasts and is not stored or transmitted elsewhere.
+            Your privacy is important to us:
+        </p>
+        <ul>
+            <li><strong>No data collection:</strong> We don't collect, store, or transmit any personal information</li>
+            <li><strong>Local storage only:</strong> Saved locations are stored in your browser's localStorage and never leave your device</li>
+            <li><strong>No tracking:</strong> No cookies, analytics, or third-party tracking scripts</li>
+            <li><strong>Location data:</strong> If you choose "Use My Location," coordinates are used only to fetch weather data and are not stored or transmitted elsewhere</li>
+            <li><strong>API calls:</strong> Weather requests go directly to public government APIs (NWS, Census) and mapping services (OpenStreetMap)</li>
+        </ul>
+
+        <h3>Open Source</h3>
+        <p>
+            This project is open source and available on <a href="https://github.com/comfr3ak/snow-day-predictor" target="_blank">GitHub</a>.
+            Contributions, suggestions, and bug reports are welcome!
         </p>
 
         <div class="mt-4">
@@ -61,23 +122,52 @@
     }
 
     h3 {
-        margin-top: 1.5rem;
+        margin-top: 2rem;
         margin-bottom: 1rem;
         color: #333;
+        border-bottom: 2px solid #0d6efd;
+        padding-bottom: 0.5rem;
+    }
+
+    h4 {
+        margin-top: 1.5rem;
+        margin-bottom: 0.75rem;
+        color: #555;
+        font-size: 1.1rem;
     }
 
     ul {
         margin-bottom: 1rem;
+        line-height: 1.8;
     }
 
     li {
         margin-bottom: 0.5rem;
     }
 
-    .text-muted {
-        color: #6c757d;
-        font-style: italic;
+    p {
+        line-height: 1.7;
+        margin-bottom: 1rem;
     }
+
+    .disclaimer {
+        background: #fff3cd;
+        border-left: 4px solid #ffc107;
+        padding: 1rem;
+        margin: 1.5rem 0;
+        border-radius: 4px;
+        font-size: 0.95rem;
+        line-height: 1.6;
+    }
+
+    a {
+        color: #0d6efd;
+        text-decoration: none;
+    }
+
+        a:hover {
+            text-decoration: underline;
+        }
 
     @@media (max-width: 768px) {
         .main-content {
@@ -87,5 +177,35 @@
         .container {
             padding: 0.5rem;
         }
+
+        h3 {
+            font-size: 1.3rem;
+        }
+
+        h4 {
+            font-size: 1rem;
+        }
     }
 </style>
+```
+
+---
+
+**Changes made:**
+
+✅ Updated algorithm description with closure vs. delay logic
+✅ Added geography-aware intelligence section with all regions
+✅ Explained multi-day closure logic
+✅ Added overnight conditions impact
+✅ Detailed the specific factors analyzed
+✅ Added technology stack info
+✅ Enhanced disclaimer with clearer warnings
+✅ Added open source section with GitHub link
+✅ Better mobile responsive styling
+
+---
+
+**Save, commit, and push!** Then your About page will be updated on the live site in ~2 minutes.
+```
+Git Changes → Commit message: "Update About page with new algorithm details"
+Commit All → Push
