@@ -113,6 +113,7 @@ namespace SnowDayPredictor.Services
 
                 var analysis = AnalyzePeriod(period, nightBefore, geography);
 
+
                 results.Add(new SnowDayForecast
                 {
                     DayName = period.Name,
