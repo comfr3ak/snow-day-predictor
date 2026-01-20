@@ -104,14 +104,14 @@
                 @if (!string.IsNullOrEmpty(forecast.SnowfallAmount))
                 {
                     <div>
-                        <strong>❄️ Expected Snow:</strong> 
+                        <strong>❄️ Expected Snow: </strong> 
                         @if (forecast.SnowfallAmount.Contains("\""))
                         {
-                            <span> @forecast.SnowfallAmount</span>
+                            <span>@forecast.SnowfallAmount</span>
                         }
                         else
                         {
-                            <span class="qualitative-snow"> @forecast.SnowfallAmount amounts</span>
+                            <span class="qualitative-snow">@forecast.SnowfallAmount amounts</span>
                         }
                     </div>
                 }
