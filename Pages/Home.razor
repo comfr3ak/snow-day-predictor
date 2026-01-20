@@ -281,19 +281,44 @@
             Console.WriteLine($"City: {cityName}, State: {state}");
 
             // Step 2: Get weather forecast
-            var weatherData = await WeatherService.GetWeatherForecast(coords.Value.lat, coords.Value.lon);
+            var (weatherData, nwsCity, nwsState) = await WeatherService.GetWeatherForecast(coords.Value.lat, coords.Value.lon);
             if (weatherData == null)
             {
                 errorMessage = "Could not retrieve weather data. The National Weather Service API may be temporarily unavailable.";
                 return;
             }
 
+            // Use NWS location data if we got it, otherwise try the geocoding APIs
+            string finalCity = "";
+            string finalState = nwsState; // NWS state is most reliable
+
+            if (!string.IsNullOrEmpty(nwsCity) && !string.IsNullOrEmpty(nwsState))
+            {
+                // NWS gave us good data
+                finalCity = nwsCity;
+                finalState = nwsState;
+                Console.WriteLine($"Using NWS location: {finalCity}, {finalState}");
+            }
+            else
+            {
+                // Fallback to geocoding
+                (cityName, state) = await WeatherService.GetCityNameFromZip(zipCode);
+                finalCity = cityName;
+                if (string.IsNullOrEmpty(finalState))
+                    finalState = state;
+                Console.WriteLine($"Using geocoding location: {finalCity}, {finalState}");
+            }
+
+            currentCityName = string.IsNullOrEmpty(finalState) ? finalCity : $"{finalCity}, {finalState}";
+
             // Step 3: Create geography context
             var geography = new GeographyContext
             {
-                State = state,
+                State = finalState,
                 Latitude = coords.Value.lat
             };
+
+            Console.WriteLine($"Geography - State: {geography.State}, Tolerance: {geography.SnowToleranceMultiplier}%");
 
             // Step 4: Calculate snow day chances
             forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography);
@@ -352,24 +377,35 @@
 
                 Console.WriteLine($"Got location: {position.Latitude}, {position.Longitude}");
 
-                // Get city name from coordinates
-                var (cityName, state) = await WeatherService.GetCityNameFromCoordinates(position.Latitude, position.Longitude);
-                currentCityName = cityName;
-                Console.WriteLine($"City from location: {currentCityName}, State: {state}");
-
-                var weatherData = await WeatherService.GetWeatherForecast(position.Latitude, position.Longitude);
+                var (weatherData, nwsCity, nwsState) = await WeatherService.GetWeatherForecast(position.Latitude, position.Longitude);
                 if (weatherData == null)
                 {
                     errorMessage = "Could not retrieve weather data for your location.";
                     return;
                 }
 
+                // Use NWS data if available, otherwise geocode
+                string finalCity = nwsCity;
+                string finalState = nwsState;
+
+                if (string.IsNullOrEmpty(finalCity) || string.IsNullOrEmpty(finalState))
+                {
+                    var (cityName, state) = await WeatherService.GetCityNameFromCoordinates(position.Latitude, position.Longitude);
+                    finalCity = cityName;
+                    if (string.IsNullOrEmpty(finalState))
+                        finalState = state;
+                }
+
+                currentCityName = string.IsNullOrEmpty(finalState) ? finalCity : $"{finalCity}, {finalState}";
+
                 // Create geography context
                 var geography = new GeographyContext
                 {
-                    State = state,
+                    State = finalState,
                     Latitude = position.Latitude
                 };
+
+                Console.WriteLine($"Location-based geography - State: {geography.State}, Tolerance: {geography.SnowToleranceMultiplier}%");
 
                 forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography);
 

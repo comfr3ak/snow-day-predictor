@@ -57,7 +57,7 @@ namespace SnowDayPredictor.Services
             return null;
         }
 
-        public async Task<NWSForecastResponse?> GetWeatherForecast(double lat, double lon)
+        public async Task<(NWSForecastResponse? forecast, string city, string state)> GetWeatherForecast(double lat, double lon)
         {
             try
             {
@@ -68,13 +68,10 @@ namespace SnowDayPredictor.Services
                 var pointsResponse = await _httpClient.GetAsync(pointsUrl);
                 Console.WriteLine($"Points API status: {pointsResponse.StatusCode}");
 
-                var pointsContent = await pointsResponse.Content.ReadAsStringAsync();
-                Console.WriteLine($"Points API response (first 500 chars): {pointsContent.Substring(0, Math.Min(500, pointsContent.Length))}");
-
                 if (!pointsResponse.IsSuccessStatusCode)
                 {
                     Console.WriteLine($"Points API failed with status: {pointsResponse.StatusCode}");
-                    return null;
+                    return (null, "", "");
                 }
 
                 var pointsData = await pointsResponse.Content.ReadFromJsonAsync<NWSPointsResponse>();
@@ -82,28 +79,30 @@ namespace SnowDayPredictor.Services
                 if (pointsData?.Properties?.Forecast == null)
                 {
                     Console.WriteLine("No forecast URL in points response");
-                    return null;
+                    return (null, "", "");
                 }
 
-                Console.WriteLine($"Forecast URL: {pointsData.Properties.Forecast}");
+                // Extract city and state from NWS response
+                string city = pointsData.Properties.RelativeLocation?.Properties?.City ?? "";
+                string state = pointsData.Properties.RelativeLocation?.Properties?.State ?? "";
+
+                Console.WriteLine($"NWS location data: {city}, {state}");
 
                 // Then get the actual forecast
                 var forecastResponse = await _httpClient.GetAsync(pointsData.Properties.Forecast);
                 Console.WriteLine($"Forecast API status: {forecastResponse.StatusCode}");
 
-                var forecastContent = await forecastResponse.Content.ReadAsStringAsync();
-                Console.WriteLine($"Forecast response (first 500 chars): {forecastContent.Substring(0, Math.Min(500, forecastContent.Length))}");
-
                 var forecast = await forecastResponse.Content.ReadFromJsonAsync<NWSForecastResponse>();
 
                 Console.WriteLine($"Parsed forecast periods: {forecast?.Properties?.Periods?.Count ?? 0}");
-                return forecast;
+
+                return (forecast, city, state);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Weather API error: {ex.Message}");
                 Console.WriteLine($"Stack trace: {ex.StackTrace}");
-                return null;
+                return (null, "", "");
             }
         }
 

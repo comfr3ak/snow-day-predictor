@@ -17,6 +17,18 @@
     {
         public string Forecast { get; set; } = "";
         public string ForecastHourly { get; set; } = "";
+        public RelativeLocation RelativeLocation { get; set; } = new();
+    }
+
+    public class RelativeLocation
+    {
+        public RelativeLocationProperties Properties { get; set; } = new();
+    }
+
+    public class RelativeLocationProperties
+    {
+        public string City { get; set; } = "";
+        public string State { get; set; } = "";
     }
 
     // NWS Forecast response
