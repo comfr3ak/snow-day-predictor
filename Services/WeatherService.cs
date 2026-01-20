@@ -18,19 +18,41 @@ namespace SnowDayPredictor.Services
         {
             try
             {
-                var url = $"https://nominatim.openstreetmap.org/search?postalcode={zipCode}&country=US&format=json&limit=1";
-                var response = await _httpClient.GetFromJsonAsync<List<Dictionary<string, JsonElement>>>(url);
+                Console.WriteLine($"Geocoding ZIP: {zipCode}");
 
-                if (response != null && response.Count > 0)
+                _httpClient.DefaultRequestHeaders.Clear();
+                _httpClient.DefaultRequestHeaders.Add("User-Agent", "SnowDayPredictor/1.0");
+
+                var url = $"https://nominatim.openstreetmap.org/search?postalcode={zipCode}&country=US&format=json&limit=1";
+
+                var response = await _httpClient.GetAsync(url);
+                Console.WriteLine($"Geocoding response status: {response.StatusCode}");
+
+                if (!response.IsSuccessStatusCode)
                 {
-                    var lat = response[0]["lat"].GetString();
-                    var lon = response[0]["lon"].GetString();
+                    Console.WriteLine("Geocoding failed, trying fallback");
+                    return null;
+                }
+
+                var content = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"Geocoding response: {content}");
+
+                var data = await response.Content.ReadFromJsonAsync<List<Dictionary<string, JsonElement>>>();
+
+                if (data != null && data.Count > 0)
+                {
+                    var lat = data[0]["lat"].GetString();
+                    var lon = data[0]["lon"].GetString();
+                    Console.WriteLine($"Coordinates found: {lat}, {lon}");
                     return (double.Parse(lat!), double.Parse(lon!));
                 }
+
+                Console.WriteLine("No geocoding results found");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Geocoding error: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
             }
             return null;
         }
@@ -346,58 +368,122 @@ namespace SnowDayPredictor.Services
         {
             try
             {
+                // Try zippopotam.us first
                 var url = $"https://api.zippopotam.us/us/{zipCode}";
 
                 Console.WriteLine($"Fetching city name from: {url}");
 
-                var response = await _httpClient.GetStringAsync(url);
-                Console.WriteLine($"Raw response: {response}");
+                _httpClient.DefaultRequestHeaders.Clear();
+                _httpClient.DefaultRequestHeaders.Add("User-Agent", "SnowDayPredictor/1.0");
 
-                using var doc = System.Text.Json.JsonDocument.Parse(response);
-                var root = doc.RootElement;
+                var response = await _httpClient.GetAsync(url);
 
-                if (root.TryGetProperty("places", out var places))
+                if (response.IsSuccessStatusCode)
                 {
-                    if (places.GetArrayLength() > 0)
+                    var content = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine($"Zippopotam response: {content}");
+
+                    using var doc = System.Text.Json.JsonDocument.Parse(content);
+                    var root = doc.RootElement;
+
+                    if (root.TryGetProperty("places", out var places))
                     {
-                        var place = places[0];
-
-                        string? city = null;
-                        string? state = null;
-                        string? stateAbbr = null;
-
-                        if (place.TryGetProperty("place name", out var placeNameElement))
+                        if (places.GetArrayLength() > 0)
                         {
-                            city = placeNameElement.GetString();
-                            Console.WriteLine($"Found city: {city}");
+                            var place = places[0];
+
+                            string? city = null;
+                            string? state = null;
+                            string? stateAbbr = null;
+
+                            if (place.TryGetProperty("place name", out var placeNameElement))
+                            {
+                                city = placeNameElement.GetString();
+                                Console.WriteLine($"Found city: {city}");
+                            }
+
+                            if (place.TryGetProperty("state", out var stateElement))
+                            {
+                                state = stateElement.GetString();
+                                Console.WriteLine($"Found state: {state}");
+                            }
+
+                            if (place.TryGetProperty("state abbreviation", out var stateAbbrElement))
+                            {
+                                stateAbbr = stateAbbrElement.GetString();
+                                Console.WriteLine($"Found state abbr: {stateAbbr}");
+                            }
+
+                            if (!string.IsNullOrEmpty(city) && !string.IsNullOrEmpty(stateAbbr))
+                            {
+                                return ($"{city}, {stateAbbr}", stateAbbr);
+                            }
                         }
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"Zippopotam failed with status: {response.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Zippopotam error: {ex.Message}");
+            }
 
-                        if (place.TryGetProperty("state", out var stateElement))
-                        {
-                            state = stateElement.GetString();
-                            Console.WriteLine($"Found state: {state}");
-                        }
+            // Fallback: Try Census.gov geocoder
+            try
+            {
+                Console.WriteLine("Trying Census.gov fallback...");
 
-                        if (place.TryGetProperty("state abbreviation", out var stateAbbrElement))
-                        {
-                            stateAbbr = stateAbbrElement.GetString();
-                            Console.WriteLine($"Found state abbr: {stateAbbr}");
-                        }
+                var censusUrl = $"https://geocoding.geo.census.gov/geocoder/locations/address?zip={zipCode}&benchmark=2020&format=json";
 
-                        if (!string.IsNullOrEmpty(city) && !string.IsNullOrEmpty(stateAbbr))
+                var censusResponse = await _httpClient.GetAsync(censusUrl);
+
+                if (censusResponse.IsSuccessStatusCode)
+                {
+                    var content = await censusResponse.Content.ReadAsStringAsync();
+                    Console.WriteLine($"Census response: {content.Substring(0, Math.Min(500, content.Length))}");
+
+                    using var doc = System.Text.Json.JsonDocument.Parse(content);
+                    var root = doc.RootElement;
+
+                    if (root.TryGetProperty("result", out var result))
+                    {
+                        if (result.TryGetProperty("addressMatches", out var matches) && matches.GetArrayLength() > 0)
                         {
-                            return ($"{city}, {stateAbbr}", stateAbbr);
+                            var match = matches[0];
+                            if (match.TryGetProperty("addressComponents", out var components))
+                            {
+                                string? city = null;
+                                string? state = null;
+
+                                if (components.TryGetProperty("city", out var cityProp))
+                                    city = cityProp.GetString();
+
+                                if (components.TryGetProperty("state", out var stateProp))
+                                    state = stateProp.GetString();
+
+                                if (!string.IsNullOrEmpty(city) && !string.IsNullOrEmpty(state))
+                                {
+                                    Console.WriteLine($"Census found: {city}, {state}");
+                                    return ($"{city}, {state}", state);
+                                }
+                            }
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error getting city name: {ex.Message}");
+                Console.WriteLine($"Census fallback error: {ex.Message}");
             }
 
+            // Last resort: just return ZIP code
+            Console.WriteLine($"All lookups failed, returning ZIP: {zipCode}");
             return (zipCode, "");
         }
+
         public async Task<(string cityName, string state)> GetCityNameFromCoordinates(double lat, double lon)
         {
             try
