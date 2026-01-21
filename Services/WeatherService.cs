@@ -1,6 +1,7 @@
-﻿using System.Net.Http.Json;
+﻿using SnowDayPredictor.Models;
+using System.Net.Http.Json;
 using System.Text.Json;
-using SnowDayPredictor.Models;
+using static SnowDayPredictor.Models.GeographyContext;
 
 namespace SnowDayPredictor.Services
 {
@@ -106,59 +107,343 @@ namespace SnowDayPredictor.Services
             }
         }
 
-        public List<SnowDayForecast> CalculateSnowDayChances(NWSForecastResponse forecast, GeographyContext geography)
+
+        public List<SnowDayForecast> CalculateSnowDayChances(
+    NWSForecastResponse forecast,
+    GeographyContext geography,
+    List<HistoricalWeatherDay> recentHistory)
         {
             var results = new List<SnowDayForecast>();
             var periods = forecast.Properties.Periods.ToList();
 
             Console.WriteLine($"Total periods available: {periods.Count}");
+            Console.WriteLine($"Historical events to consider: {recentHistory.Count(h => h.SnowfallInches > 2)}");
 
-            // Process each daytime period
-            for (int i = 0; i < periods.Count && results.Count < 7; i++)
+            // First pass: Analyze ALL days (including weekends for aftermath tracking)
+            var allDays = new List<(Period period, int closure, int delay, double snowfall, string? display)>();
+
+            for (int i = 0; i < periods.Count; i++)
             {
                 var period = periods[i];
+                if (!period.IsDaytime) continue;
 
-                // Only process daytime periods
-                if (!period.IsDaytime)
-                    continue;
+                var dayOfWeek = period.StartTime.DayOfWeek;
+                var isWeekend = dayOfWeek == DayOfWeek.Saturday || dayOfWeek == DayOfWeek.Sunday;
 
-                Console.WriteLine($"Processing daytime period: {period.Name}");
+                Console.WriteLine($"\n=== Analyzing: {period.Name} ({period.StartTime:MM/dd}) {(isWeekend ? "[WEEKEND]" : "")} ===");
 
-                // Find the night before this day (if it exists)
-                Period? nightBefore = null;
-                if (i > 0 && !periods[i - 1].IsDaytime)
-                {
-                    nightBefore = periods[i - 1];
-                    Console.WriteLine($"Found night before: {nightBefore.Name}");
-                }
-
+                Period? nightBefore = i > 0 && !periods[i - 1].IsDaytime ? periods[i - 1] : null;
                 var analysis = AnalyzePeriod(period, nightBefore, geography);
 
-
-                results.Add(new SnowDayForecast
-                {
-                    DayName = period.Name,
-                    Date = period.StartTime,
-                    SnowDayChance = analysis.ClosureChance,
-                    DelayChance = analysis.DelayChance,
-                    Temperature = period.Temperature,
-                    Forecast = period.DetailedForecast,
-                    PrecipitationChance = period.ProbabilityOfPrecipitation?.Value ?? 0,
-                    SnowfallAmount = analysis.SnowfallDisplay,
-                    State = geography.State
-                });
+                allDays.Add((period, analysis.ClosureChance, analysis.DelayChance,
+                            analysis.SnowfallInches, analysis.SnowfallDisplay));
             }
 
+            Console.WriteLine($"\nTotal days analyzed: {allDays.Count}");
 
-            Console.WriteLine($"Generated {results.Count} forecast days");
+            // Second pass: Apply multi-day impacts to ALL days (including weekends)
+            for (int i = 0; i < allDays.Count; i++)
+            {
+                var current = allDays[i];
+                var currentDate = current.period.StartTime.Date;
+                var isWeekend = current.period.StartTime.DayOfWeek == DayOfWeek.Saturday ||
+                                current.period.StartTime.DayOfWeek == DayOfWeek.Sunday;
 
-            // Apply multi-day closure logic for snow-intolerant regions
-            ApplyMultiDayClosures(results, geography);
+                // Check historical aftermath
+                var historicalAftermath = CalculateAftermathImpact(currentDate, recentHistory, geography);
 
+                // Check forecast-based aftermath (look backward at ALL previous days, including weekends)
+                var forecastAftermath = CalculateForecastAftermath(i, allDays, geography);
+
+                // Take the maximum of all impacts
+                var finalClosure = Math.Max(current.closure,
+                                           Math.Max(historicalAftermath.ClosureChance,
+                                                   forecastAftermath.ClosureChance));
+                var finalDelay = Math.Max(current.delay,
+                                         Math.Max(historicalAftermath.DelayChance,
+                                                 forecastAftermath.DelayChance));
+
+                if (historicalAftermath.ClosureChance > 0 || historicalAftermath.DelayChance > 0)
+                {
+                    Console.WriteLine($"Historical aftermath: +{historicalAftermath.ClosureChance}% closure, +{historicalAftermath.DelayChance}% delay");
+                }
+                if (forecastAftermath.ClosureChance > 0 || forecastAftermath.DelayChance > 0)
+                {
+                    Console.WriteLine($"Forecast aftermath: +{forecastAftermath.ClosureChance}% closure, +{forecastAftermath.DelayChance}% delay");
+                }
+
+                // Add ALL days (including weekends) to results
+                results.Add(new SnowDayForecast
+                {
+                    DayName = current.period.Name,
+                    Date = current.period.StartTime,
+                    SnowDayChance = finalClosure,
+                    DelayChance = finalDelay,
+                    Temperature = current.period.Temperature,
+                    Forecast = current.period.DetailedForecast,
+                    PrecipitationChance = current.period.ProbabilityOfPrecipitation?.Value ?? 0,
+                    SnowfallAmount = current.display,
+                    State = geography.State
+                });
+
+                // Stop after we have 7 days total
+                if (results.Count >= 7) break;
+            }
+
+            Console.WriteLine($"\nGenerated {results.Count} weekday forecasts");
             return results;
         }
-        private (int ClosureChance, int DelayChance, string? SnowfallDisplay) AnalyzePeriod(
-            Period day, Period? nightBefore, GeographyContext geography)
+
+
+        private (int ClosureChance, int DelayChance) CalculateForecastAftermath(
+    int currentIndex,
+    List<(Period period, int closure, int delay, double snowfall, string? display)> forecastDays,
+    GeographyContext geography)
+        {
+            int maxClosureAftermath = 0;
+            int maxDelayAftermath = 0;
+
+            // Look back at previous forecast days (up to 5 days)
+            for (int lookback = 1; lookback <= Math.Min(5, currentIndex); lookback++)
+            {
+                var previousDay = forecastDays[currentIndex - lookback];
+                var previousDate = previousDay.period.StartTime.Date;
+                var currentDate = forecastDays[currentIndex].period.StartTime.Date;
+                var daysSince = (currentDate - previousDate).Days;
+
+                // Only consider if it was a significant event
+                bool significantEvent = previousDay.closure >= 70 || previousDay.snowfall >= 4.0;
+
+                if (!significantEvent) continue;
+
+                Console.WriteLine($"Found significant event on {previousDate:MM/dd}: {previousDay.snowfall:F1}\" snow, {previousDay.closure}% closure");
+
+                // Check if temperatures have stayed cold (below freezing)
+                bool coldPersists = CheckColdPersistence(currentIndex - lookback, currentIndex, forecastDays);
+
+                int closureAftermath = 0;
+                int delayAftermath = 0;
+
+                // Calculate base aftermath
+                if (daysSince == 1) // Day after event
+                {
+                    if (previousDay.snowfall >= 8 || previousDay.closure >= 80)
+                    {
+                        closureAftermath = 60;
+                        delayAftermath = 75;
+                    }
+                    else if (previousDay.snowfall >= 6 || previousDay.closure >= 70)
+                    {
+                        closureAftermath = 45;
+                        delayAftermath = 65;
+                    }
+                    else
+                    {
+                        closureAftermath = 30;
+                        delayAftermath = 55;
+                    }
+                }
+                else if (daysSince == 2) // 2 days after
+                {
+                    if (previousDay.snowfall >= 8)
+                    {
+                        closureAftermath = 35;
+                        delayAftermath = 55;
+                    }
+                    else
+                    {
+                        closureAftermath = 20;
+                        delayAftermath = 40;
+                    }
+                }
+                else if (daysSince == 3) // 3 days after
+                {
+                    if (previousDay.snowfall >= 8)
+                    {
+                        closureAftermath = 20;
+                        delayAftermath = 40;
+                    }
+                    else
+                    {
+                        closureAftermath = 10;
+                        delayAftermath = 25;
+                    }
+                }
+                else if (daysSince == 4) // 4 days after
+                {
+                    if (previousDay.snowfall >= 8)
+                    {
+                        closureAftermath = 10;
+                        delayAftermath = 25;
+                    }
+                    else
+                    {
+                        closureAftermath = 5;
+                        delayAftermath = 15;
+                    }
+                }
+                else if (daysSince == 5) // 5 days after (rare)
+                {
+                    if (previousDay.snowfall >= 10)
+                    {
+                        closureAftermath = 5;
+                        delayAftermath = 15;
+                    }
+                }
+
+                // CRITICAL: Cold temps extend impact significantly
+                if (coldPersists)
+                {
+                    delayAftermath = (int)(delayAftermath * 1.4); // 40% boost for delays
+                    closureAftermath = (int)(closureAftermath * 1.2); // 20% boost for closures
+                    Console.WriteLine($"Cold temps persisting - boosting aftermath impact");
+                }
+
+                // Geography adjustment
+                if (geography.SnowToleranceMultiplier >= 150) // Mid-South and lower
+                {
+                    closureAftermath = (int)(closureAftermath * 1.4);
+                    delayAftermath = (int)(delayAftermath * 1.3);
+                }
+                else if (geography.SnowToleranceMultiplier >= 200) // Deep South
+                {
+                    closureAftermath = (int)(closureAftermath * 1.8);
+                    delayAftermath = (int)(delayAftermath * 1.5);
+                }
+                else if (geography.SnowToleranceMultiplier <= 75) // High tolerance areas
+                {
+                    closureAftermath = (int)(closureAftermath * 0.7);
+                    delayAftermath = (int)(delayAftermath * 0.8);
+                }
+
+                // Track the maximum aftermath from any previous event
+                maxClosureAftermath = Math.Max(maxClosureAftermath, closureAftermath);
+                maxDelayAftermath = Math.Max(maxDelayAftermath, delayAftermath);
+
+                Console.WriteLine($"Aftermath from {previousDate:MM/dd} ({daysSince} days ago): +{closureAftermath}% closure, +{delayAftermath}% delay");
+            }
+
+            return (Math.Min(maxClosureAftermath, 95), Math.Min(maxDelayAftermath, 95));
+        }
+
+        private bool CheckColdPersistence(int startIndex, int endIndex,
+            List<(Period period, int closure, int delay, double snowfall, string? display)> forecastDays)
+        {
+            // Check if temps have stayed at or below freezing for most of the period
+            int coldDays = 0;
+            int totalDays = endIndex - startIndex + 1;
+
+            for (int i = startIndex; i <= endIndex; i++)
+            {
+                if (forecastDays[i].period.Temperature <= 32)
+                {
+                    coldDays++;
+                }
+            }
+
+            // If 70%+ of days were at/below freezing, cold persists
+            bool persists = (coldDays / (double)totalDays) >= 0.7;
+
+            if (persists)
+            {
+                Console.WriteLine($"Cold persistence detected: {coldDays}/{totalDays} days below freezing");
+            }
+
+            return persists;
+        }
+
+        private (int ClosureChance, int DelayChance) CalculateAftermathImpact(
+    DateTime forecastDate,
+    List<HistoricalWeatherDay> recentHistory,
+    GeographyContext geography)
+        {
+            // Find recent significant snow events (4+ inches)
+            var significantEvents = recentHistory
+                .Where(h => h.SnowfallInches >= 4.0)
+                .OrderByDescending(h => h.Date)
+                .ToList();
+
+            if (!significantEvents.Any())
+                return (0, 0);
+
+            var mostRecentEvent = significantEvents.First();
+            var daysSinceEvent = (forecastDate.Date - mostRecentEvent.Date).Days;
+
+            // Only consider events from last 3 days
+            if (daysSinceEvent < 1 || daysSinceEvent > 3)
+                return (0, 0);
+
+            Console.WriteLine($"Aftermath from {mostRecentEvent.Date:MM/dd}: {mostRecentEvent.SnowfallInches:F1}\" snow, {daysSinceEvent} days ago");
+
+            int closureChance = 0;
+            int delayChance = 0;
+
+            // Day 2 after major event (Day 1 = event day, Day 2 = next day)
+            if (daysSinceEvent == 1)
+            {
+                if (mostRecentEvent.SnowfallInches >= 8)
+                {
+                    // Major event (8+ inches)
+                    closureChance = 50;
+                    delayChance = 70;
+                }
+                else if (mostRecentEvent.SnowfallInches >= 6)
+                {
+                    // Significant event (6-8 inches)
+                    closureChance = 35;
+                    delayChance = 65;
+                }
+                else
+                {
+                    // Moderate event (4-6 inches)
+                    closureChance = 20;
+                    delayChance = 55;
+                }
+
+                // Geography adjustment - southern states take longer to recover
+                if (geography.SnowToleranceMultiplier >= 150) // Mid-South and lower
+                {
+                    closureChance = (int)(closureChance * 1.5);
+                    delayChance = (int)(delayChance * 1.3);
+                }
+                else if (geography.SnowToleranceMultiplier >= 200) // Deep South
+                {
+                    closureChance = (int)(closureChance * 2.0);
+                    delayChance = (int)(delayChance * 1.5);
+                }
+            }
+            // Day 3 after event (mainly southern states)
+            else if (daysSinceEvent == 2 && geography.SnowToleranceMultiplier >= 150)
+            {
+                if (mostRecentEvent.SnowfallInches >= 6)
+                {
+                    closureChance = 30;
+                    delayChance = 40;
+                }
+                else
+                {
+                    closureChance = 15;
+                    delayChance = 30;
+                }
+            }
+            // Day 4 (only deep south with major events)
+            else if (daysSinceEvent == 3 &&
+                     geography.SnowToleranceMultiplier >= 200 &&
+                     mostRecentEvent.SnowfallInches >= 8)
+            {
+                closureChance = 20;
+                delayChance = 25;
+            }
+
+            // Cap at 95%
+            closureChance = Math.Min(closureChance, 95);
+            delayChance = Math.Min(delayChance, 95);
+
+            return (closureChance, delayChance);
+        }
+
+        private (int ClosureChance, int DelayChance, double SnowfallInches, string? SnowfallDisplay) AnalyzePeriod(
+           Period day, Period? nightBefore, GeographyContext geography)
         {
             int closureChance = 0;
             int delayChance = 0;
@@ -171,56 +456,39 @@ namespace SnowDayPredictor.Services
             bool hasSnow = dayShort.Contains("snow") || dayShort.Contains("blizzard");
             bool hasIce = dayText.Contains("freezing") || dayText.Contains("ice") || dayText.Contains("sleet");
 
-            // Analyze overnight conditions (critical for morning delays/closures)
-            int overnightImpact = 0;
-            if (nightBefore != null)
-            {
-                var nightText = nightBefore.DetailedForecast.ToLower();
-                var nightShort = nightBefore.ShortForecast.ToLower();
-                bool nightSnow = nightShort.Contains("snow") || nightShort.Contains("blizzard");
-                bool nightIce = nightText.Contains("freezing") || nightText.Contains("ice");
-
-                if (nightSnow || nightIce)
-                {
-                    overnightImpact = nightSnow ? 25 : 20;
-                    Console.WriteLine($"Overnight impact detected: {overnightImpact}");
-                }
-            }
-
-            // Parse snowfall amount
+            // Parse snowfall amount - try multiple methods
+            double snowfallInches = InferSnowfallAmount(day);
             string? snowfallDisplay = null;
-            double snowfallInches = 0;
 
-            if (day.SnowfallAmount?.Value.HasValue == true)
+            if (snowfallInches >= 0.1)
             {
-                snowfallInches = day.SnowfallAmount.Value.Value * 39.3701;
-                if (snowfallInches >= 0.1)
-                    snowfallDisplay = $"{snowfallInches:F1}\"";
+                snowfallDisplay = $"{snowfallInches:F1}\"";
             }
             else
             {
                 snowfallDisplay = ParseSnowfallFromText(dayText);
-                // Try to estimate inches from qualitative descriptions
-                if (snowfallDisplay == "Heavy") snowfallInches = 6;
-                else if (snowfallDisplay == "Moderate") snowfallInches = 2;
-                else if (snowfallDisplay == "Light") snowfallInches = 0.5;
             }
 
-            // === CLOSURE CALCULATION ===
+            Console.WriteLine($"Snowfall estimate: {snowfallInches:F1}\" ({snowfallDisplay ?? "none"})");
+
+            // ==========================================
+            // INDEPENDENT CLOSURE ANALYSIS (Severity)
+            // ==========================================
             if (hasSnow || hasIce)
             {
-                // Base chance
-                closureChance = hasIce ? 30 : 20;
+                closureChance = hasIce ? 35 : 25;
 
-                // Snowfall amount impact
-                if (snowfallInches >= 8) closureChance += 50;
+                // Snowfall amount
+                if (snowfallInches >= 10) closureChance += 60;
+                else if (snowfallInches >= 8) closureChance += 50;
                 else if (snowfallInches >= 6) closureChance += 40;
                 else if (snowfallInches >= 4) closureChance += 30;
                 else if (snowfallInches >= 2) closureChance += 20;
                 else if (snowfallInches >= 1) closureChance += 10;
 
-                // Temperature impact (colder = more dangerous)
-                if (dayTemp <= 20) closureChance += 15;
+                // Temperature danger
+                if (dayTemp <= 15) closureChance += 20;
+                else if (dayTemp <= 20) closureChance += 15;
                 else if (dayTemp <= 25) closureChance += 10;
                 else if (dayTemp <= 30) closureChance += 5;
 
@@ -230,42 +498,226 @@ namespace SnowDayPredictor.Services
                 else if (dayPrecip >= 40) closureChance += 10;
 
                 // Severity keywords
-                if (dayText.Contains("heavy") || dayText.Contains("blizzard")) closureChance += 25;
-                if (dayText.Contains("freezing rain")) closureChance += 30;
+                if (dayText.Contains("heavy snow")) closureChance += 25;
+                if (dayText.Contains("blizzard")) closureChance += 30;
+                if (dayText.Contains("freezing rain")) closureChance += 35;
 
-                // Overnight impact
-                closureChance += overnightImpact;
+                // Still snowing during school hours
+                if (dayText.Contains("snow") && !dayText.Contains("chance"))
+                    closureChance += 15;
 
                 // Geography adjustment
                 closureChance = (closureChance * geography.SnowToleranceMultiplier) / 100;
-
-                Console.WriteLine($"Base closure chance: {closureChance}");
             }
 
-            // === DELAY CALCULATION ===
-            // Delays are more common than closures for marginal conditions
-            if (hasSnow || hasIce || overnightImpact > 0)
+            // ==========================================
+            // INDEPENDENT DELAY ANALYSIS (Time-window)
+            // ==========================================
+
+            // Check for morning ice window (independent of snow)
+            bool morningIceWindow = false;
+            if (nightBefore != null)
             {
-                delayChance = closureChance / 2; // Start with half the closure chance
+                var nightTemp = nightBefore.Temperature;
+                var nightText = nightBefore.DetailedForecast.ToLower();
 
-                // Conditions more likely to cause delays than closures
-                if (snowfallInches >= 0.5 && snowfallInches < 3) delayChance += 20;
-                if (dayTemp > 28 && dayTemp <= 33) delayChance += 15; // Marginal temps
-                if (dayText.Contains("mixed") || dayText.Contains("wintry mix")) delayChance += 20;
-                if (overnightImpact > 0 && closureChance < 40) delayChance += 25;
+                // Classic ice scenario: Temps cross freezing AND there was moisture
+                if (nightTemp <= 32 && dayTemp >= 35)
+                {
+                    // CRITICAL: Only trigger if there was actual precipitation/moisture
+                    bool hadPrecipitation = nightText.Contains("rain") ||
+                                           nightText.Contains("snow") ||
+                                           nightText.Contains("drizzle") ||
+                                           nightText.Contains("sleet") ||
+                                           nightText.Contains("mix") ||
+                                           dayText.Contains("rain") ||
+                                           dayText.Contains("drizzle");
 
-                // If closure chance is high, delay chance should be too
-                if (closureChance >= 60) delayChance = Math.Max(delayChance, 75);
-                else if (closureChance >= 40) delayChance = Math.Max(delayChance, 60);
+                    // Also check for wet roads from previous conditions
+                    bool wetConditions = nightText.Contains("wet") ||
+                                       nightText.Contains("shower") ||
+                                       nightBefore.ProbabilityOfPrecipitation?.Value > 30;
 
-                Console.WriteLine($"Delay chance: {delayChance}");
+                    if (hadPrecipitation || wetConditions)
+                    {
+                        morningIceWindow = true;
+                        Console.WriteLine("Morning ice window detected (freeze → thaw with moisture)");
+
+                        delayChance += 60; // Base delay for ice window
+
+                        // Recent/ongoing precipitation makes it worse
+                        if (hadPrecipitation)
+                        {
+                            delayChance += 20; // Moisture + freeze = definite ice
+                            Console.WriteLine("Precipitation detected - ice highly likely");
+                        }
+
+                        // How quickly does it warm up?
+                        if (dayTemp >= 40)
+                        {
+                            delayChance += 10; // Fast warmup = good for delay
+                        }
+                        else if (dayTemp <= 36)
+                        {
+                            delayChance -= 10; // Slow warmup = might need closure
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Temps cross 32°F but no moisture detected - no ice risk");
+                    }
+                }
+            }
+
+            // Overnight snow that ended early
+            if (hasSnow && nightBefore != null)
+            {
+                var nightText = nightBefore.DetailedForecast.ToLower();
+                bool nightSnow = nightText.Contains("snow");
+
+                if (nightSnow)
+                {
+                    Console.WriteLine("Overnight snow detected");
+
+                    // Snow overnight, but stopped = delay likely
+                    if (!dayText.Contains("snow") || dayText.Contains("chance"))
+                    {
+                        // Snow ended, roads being cleared
+                        if (snowfallInches >= 1 && snowfallInches < 4)
+                        {
+                            delayChance += 50; // Light to moderate overnight snow
+                        }
+                        else if (snowfallInches >= 4 && snowfallInches < 6)
+                        {
+                            delayChance += 40; // Heavier, but crews have time
+                        }
+
+                        // Temperature helps or hurts
+                        if (dayTemp >= 35) delayChance += 15; // Warming = melting
+                        if (dayTemp <= 25) delayChance -= 10; // Cold = stays icy
+                    }
+                    else
+                    {
+                        // Still snowing into morning = bad for delay
+                        delayChance += 20; // Some delay possible
+                    }
+                }
+            }
+
+            // Light/marginal snow conditions (delay-first approach)
+            if (hasSnow && snowfallInches >= 1 && snowfallInches < 3)
+            {
+                delayChance += 40; // Try delay before closing
+
+                if (geography.SnowToleranceMultiplier >= 100) // Not high-tolerance areas
+                    delayChance += 20;
+            }
+
+            // Mixed precipitation = messy but often just delays
+            if (dayText.Contains("mix") || dayText.Contains("wintry mix"))
+            {
+                delayChance += 35;
+            }
+
+            // Geography adjustment for delays
+            if (geography.SnowToleranceMultiplier >= 150)
+            {
+                // Southern areas: any ice/snow causes delays
+                delayChance = (int)(delayChance * 1.3);
+            }
+            else if (geography.SnowToleranceMultiplier <= 75)
+            {
+                // Northern areas: less likely to delay unless necessary
+                delayChance = (int)(delayChance * 0.8);
+            }
+
+            // ==========================================
+            // RELATIONSHIP LOGIC
+            // ==========================================
+
+            // If closure is very high, delay becomes less relevant
+            if (closureChance >= 75)
+            {
+                delayChance = Math.Min(delayChance, 25);
+                Console.WriteLine("High closure reduces delay probability (too severe)");
+            }
+
+            // If closure is moderate and delay is low, might use delay as hedge
+            if (closureChance >= 40 && closureChance <= 70 && delayChance < 50)
+            {
+                delayChance = Math.Max(delayChance, closureChance - 15);
+                Console.WriteLine("Borderline conditions - delay as hedge strategy");
+            }
+
+            // Ice with no snow = delay-heavy scenario
+            if (hasIce && !hasSnow && morningIceWindow)
+            {
+                if (closureChance < 40)
+                {
+                    delayChance = Math.Max(delayChance, 65);
+                    Console.WriteLine("Ice window without snow - high delay focus");
+                }
             }
 
             // Cap percentages
             closureChance = Math.Min(closureChance, 95);
             delayChance = Math.Min(delayChance, 95);
 
-            return (closureChance, delayChance, snowfallDisplay);
+            Console.WriteLine($"Final: {closureChance}% closure, {delayChance}% delay");
+
+            return (closureChance, delayChance, snowfallInches, snowfallDisplay);
+        }
+
+        private double InferSnowfallAmount(Period period)
+        {
+            var text = period.DetailedForecast.ToLower();
+            var shortText = period.ShortForecast.ToLower();
+            var precipProb = period.ProbabilityOfPrecipitation?.Value ?? 0;
+            var temp = period.Temperature;
+
+            // If NWS gave us a number, use it
+            if (period.SnowfallAmount?.Value.HasValue == true)
+            {
+                return period.SnowfallAmount.Value.Value * 39.3701; // cm to inches
+            }
+
+            // Look for explicit amounts in text
+            var textAmount = ParseSnowfallFromText(text);
+            if (textAmount != null && textAmount.Contains("\""))
+            {
+                // Try to extract numeric value
+                var match = System.Text.RegularExpressions.Regex.Match(textAmount, @"(\d+\.?\d*)");
+                if (match.Success && double.TryParse(match.Value, out var inches))
+                {
+                    return inches;
+                }
+            }
+
+            // Infer from conditions
+            bool hasSnow = shortText.Contains("snow") && !shortText.Contains("chance");
+
+            if (!hasSnow) return 0;
+
+            // Heavy snow indicators
+            if (text.Contains("heavy snow") || text.Contains("blizzard"))
+                return 8.0;
+
+            // High confidence + cold = significant
+            if (precipProb >= 80 && temp <= 25)
+                return 6.0;
+
+            if (precipProb >= 70 && temp <= 28)
+                return 4.0;
+
+            // Moderate snow
+            if (precipProb >= 60 || shortText == "snow")
+                return 3.0;
+
+            // Light snow
+            if (precipProb >= 40 || shortText.Contains("snow"))
+                return 1.5;
+
+            return 0.5; // Trace
         }
 
         private void ApplyMultiDayClosures(List<SnowDayForecast> forecasts, GeographyContext geography)
@@ -606,6 +1058,59 @@ namespace SnowDayPredictor.Services
     };
 
             return states.TryGetValue(stateName, out var abbr) ? abbr : stateName;
+        }
+
+
+        public async Task<List<HistoricalWeatherDay>> GetRecentWeather(double lat, double lon, int daysBack = 3)
+        {
+            try
+            {
+                var endDate = DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd");
+                var startDate = DateTime.Today.AddDays(-daysBack).ToString("yyyy-MM-dd");
+
+                var url = $"https://archive-api.open-meteo.com/v1/archive?" +
+                          $"latitude={lat:F4}&longitude={lon:F4}&" +
+                          $"start_date={startDate}&end_date={endDate}&" +
+                          $"daily=temperature_2m_max,temperature_2m_min,snowfall_sum,precipitation_sum&" +
+                          $"temperature_unit=fahrenheit&precipitation_unit=inch";
+
+                Console.WriteLine($"Fetching historical weather: {url}");
+
+                var response = await _httpClient.GetFromJsonAsync<OpenMeteoHistoricalResponse>(url);
+
+                if (response?.Daily != null && response.Daily.Time.Count > 0)
+                {
+                    var result = new List<HistoricalWeatherDay>();
+
+                    for (int i = 0; i < response.Daily.Time.Count; i++)
+                    {
+                        var day = new HistoricalWeatherDay
+                        {
+                            Date = DateTime.Parse(response.Daily.Time[i]),
+                            SnowfallInches = response.Daily.SnowfallSum[i],
+                            TempMax = response.Daily.TempMax[i],
+                            TempMin = response.Daily.TempMin[i],
+                            Precipitation = response.Daily.PrecipitationSum[i]
+                        };
+
+                        result.Add(day);
+
+                        if (day.SnowfallInches > 0)
+                        {
+                            Console.WriteLine($"Historical: {day.Date:MM/dd} - {day.SnowfallInches:F1}\" snow, temps {day.TempMin:F0}-{day.TempMax:F0}°F");
+                        }
+                    }
+
+                    Console.WriteLine($"Retrieved {result.Count} days of historical data");
+                    return result;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Historical weather error: {ex.Message}");
+            }
+
+            return new List<HistoricalWeatherDay>();
         }
     }
 }

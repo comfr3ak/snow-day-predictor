@@ -21,7 +21,12 @@ jobs:
         run: dotnet publish SnowDayPredictor.csproj -c Release -o release --nologo
         
       - name: Change base tag
-        run: sed -i 's/<base href="\/" \/>/<base href="\/snow-day-predictor\/" \/>/g' release/wwwroot/index.html
+        run: |
+          $file = "release/wwwroot/index.html"
+          $content = Get-Content $file -Raw
+          $content = $content -replace '<base href="/" />', '<base href="/snow-day-predictor/" />'
+          Set-Content $file -Value $content -NoNewline
+        shell: pwsh
         
       - name: Add .nojekyll
         run: touch release/wwwroot/.nojekyll

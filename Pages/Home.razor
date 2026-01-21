@@ -78,25 +78,38 @@
              <div class="forecast-container">
     @foreach (var forecast in forecasts)
     {
-        <div class="forecast-card" style="border-left: 4px solid @forecast.ChanceColor">
+        var isWeekend = forecast.Date.DayOfWeek == DayOfWeek.Saturday || 
+                        forecast.Date.DayOfWeek == DayOfWeek.Sunday;
+        
+        <div class="forecast-card" style="border-left: 4px solid @(isWeekend ? "#6c757d" : forecast.ChanceColor)">
             <div class="forecast-header">
                 <h4>@forecast.DayName</h4>
                 <span class="date">@forecast.Date.ToString("MMM dd")</span>
             </div>
             
-            <!-- Closure Chance -->
-            <div class="snow-chance" style="border-color: @forecast.ChanceColor">
-                <div class="chance-type">CLOSURE</div>
-                <div class="percentage" style="color: @forecast.ChanceColor">@forecast.SnowDayChance%</div>
-                <div class="chance-label">@forecast.ChanceLevel Chance</div>
-            </div>
-            
-            <!-- Delay Chance -->
-            <div class="delay-chance" style="border-color: @forecast.DelayColor">
-                <div class="chance-type">DELAY</div>
-                <div class="percentage" style="color: @forecast.DelayColor">@forecast.DelayChance%</div>
-                <div class="chance-label">@forecast.DelayLevel Chance</div>
-            </div>
+            @if (isWeekend)
+            {
+                <!-- Weekend display - no closure/delay predictions -->
+                <div class="weekend-notice">
+                    <div class="weekend-icon">📅</div>
+                    <div class="weekend-text">No School - Weekend</div>
+                </div>
+            }
+            else
+            {
+                <!-- Weekday display - show closure and delay -->
+                <div class="snow-chance" style="border-color: @forecast.ChanceColor">
+                    <div class="chance-type">CLOSURE</div>
+                    <div class="percentage" style="color: @forecast.ChanceColor">@forecast.SnowDayChance%</div>
+                    <div class="chance-label">@forecast.ChanceLevel Chance</div>
+                </div>
+                
+                <div class="delay-chance" style="border-color: @forecast.DelayColor">
+                    <div class="chance-type">DELAY</div>
+                    <div class="percentage" style="color: @forecast.DelayColor">@forecast.DelayChance%</div>
+                    <div class="chance-label">@forecast.DelayLevel Chance</div>
+                </div>
+            }
             
             <div class="forecast-details">
                 <div><strong>Temperature:</strong> @forecast.Temperature°F</div>
@@ -275,12 +288,7 @@
                 return;
             }
 
-            // Get city name and state
-            var (cityName, state) = await WeatherService.GetCityNameFromZip(zipCode);
-            currentCityName = cityName;
-            Console.WriteLine($"City: {cityName}, State: {state}");
-
-            // Step 2: Get weather forecast
+            // Step 2: Get weather forecast and location
             var (weatherData, nwsCity, nwsState) = await WeatherService.GetWeatherForecast(coords.Value.lat, coords.Value.lon);
             if (weatherData == null)
             {
@@ -288,7 +296,10 @@
                 return;
             }
 
-            // Use NWS location data if we got it, otherwise try the geocoding APIs
+            // Step 3: Get historical weather data (last 3 days)
+            var historicalWeather = await WeatherService.GetRecentWeather(coords.Value.lat, coords.Value.lon, daysBack: 3);
+
+            // Step 4: Determine location (prefer NWS, fallback to geocoding)
             string finalCity = "";
             string finalState = nwsState; // NWS state is most reliable
 
@@ -301,17 +312,28 @@
             }
             else
             {
-                // Fallback to geocoding
-                (cityName, state) = await WeatherService.GetCityNameFromZip(zipCode);
-                finalCity = cityName;
-                if (string.IsNullOrEmpty(finalState))
-                    finalState = state;
-                Console.WriteLine($"Using geocoding location: {finalCity}, {finalState}");
+                // Fallback: try geocoding with the ZIP code we have
+                Console.WriteLine($"NWS didn't provide location, trying geocoding with ZIP: {zipCode}");
+
+                if (!string.IsNullOrEmpty(zipCode))
+                {
+                    var (cityName, state) = await WeatherService.GetCityNameFromZip(zipCode);
+                    finalCity = cityName;
+                    if (string.IsNullOrEmpty(finalState))
+                        finalState = state;
+                    Console.WriteLine($"Using geocoding location: {finalCity}, {finalState}");
+                }
+                else
+                {
+                    // No ZIP and no NWS data - use coordinates fallback
+                    finalCity = $"Location ({coords.Value.lat:F2}, {coords.Value.lon:F2})";
+                    Console.WriteLine($"No city data available, using coordinates");
+                }
             }
 
             currentCityName = string.IsNullOrEmpty(finalState) ? finalCity : $"{finalCity}, {finalState}";
 
-            // Step 3: Create geography context
+            // Step 5: Create geography context
             var geography = new GeographyContext
             {
                 State = finalState,
@@ -320,8 +342,8 @@
 
             Console.WriteLine($"Geography - State: {geography.State}, Tolerance: {geography.SnowToleranceMultiplier}%");
 
-            // Step 4: Calculate snow day chances
-            forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography);
+            // Step 6: Calculate snow day chances WITH historical context
+            forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography, historicalWeather);
 
             if (!forecasts.Any())
             {
@@ -377,12 +399,16 @@
 
                 Console.WriteLine($"Got location: {position.Latitude}, {position.Longitude}");
 
+                // Get weather forecast
                 var (weatherData, nwsCity, nwsState) = await WeatherService.GetWeatherForecast(position.Latitude, position.Longitude);
                 if (weatherData == null)
                 {
                     errorMessage = "Could not retrieve weather data for your location.";
                     return;
                 }
+
+                // Get historical weather data (last 3 days)
+                var historicalWeather = await WeatherService.GetRecentWeather(position.Latitude, position.Longitude, daysBack: 3);
 
                 // Use NWS data if available, otherwise geocode
                 string finalCity = nwsCity;
@@ -407,7 +433,8 @@
 
                 Console.WriteLine($"Location-based geography - State: {geography.State}, Tolerance: {geography.SnowToleranceMultiplier}%");
 
-                forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography);
+                // Calculate snow day chances WITH historical context
+                forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography, historicalWeather);
 
                 if (!forecasts.Any())
                 {
@@ -438,6 +465,7 @@
             isLoading = false;
         }
     }
+
 
     private void InvalidateCacheIfNeeded()
     {
@@ -643,5 +671,25 @@
     .qualitative-snow {
         font-style: italic;
         color: #666;
+    }
+
+    .weekend-notice {
+        text-align: center;
+        padding: 2rem 1rem;
+        margin: 1rem 0;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border: 2px solid #6c757d;
+    }
+
+    .weekend-icon {
+        font-size: 3rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .weekend-text {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #6c757d;
     }
 </style>

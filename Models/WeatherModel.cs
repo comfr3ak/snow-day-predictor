@@ -160,5 +160,40 @@
             "NC" or "TN" or "KY" or "VA" or "WV" => 2,
             _ => 1
         };
+
+        // Historical weather data
+        public class HistoricalWeatherDay
+        {
+            public DateTime Date { get; set; }
+            public double SnowfallInches { get; set; }
+            public double TempMax { get; set; }
+            public double TempMin { get; set; }
+            public double Precipitation { get; set; }
+        }
+
+        // Open-Meteo API response models
+        public class OpenMeteoHistoricalResponse
+        {
+            [System.Text.Json.Serialization.JsonPropertyName("daily")]
+            public DailyData? Daily { get; set; }
+        }
+
+        public class DailyData
+        {
+            [System.Text.Json.Serialization.JsonPropertyName("time")]
+            public List<string> Time { get; set; } = new();
+
+            [System.Text.Json.Serialization.JsonPropertyName("snowfall_sum")]
+            public List<double> SnowfallSum { get; set; } = new();
+
+            [System.Text.Json.Serialization.JsonPropertyName("temperature_2m_max")]
+            public List<double> TempMax { get; set; } = new();
+
+            [System.Text.Json.Serialization.JsonPropertyName("temperature_2m_min")]
+            public List<double> TempMin { get; set; } = new();
+
+            [System.Text.Json.Serialization.JsonPropertyName("precipitation_sum")]
+            public List<double> PrecipitationSum { get; set; } = new();
+        }
     }
 }
