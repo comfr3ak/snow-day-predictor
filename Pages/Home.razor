@@ -52,124 +52,124 @@
             </div>
         </div>
 
-            @if (errorMessage != null)
-            {
-                <div class="alert alert-danger">@errorMessage</div>
-            }
+        @if (errorMessage != null)
+        {
+            <div class="alert alert-danger">@errorMessage</div>
+        }
 
-            @if (forecasts != null && forecasts.Any())
-            {
-                <div class="forecast-title">
-                    <h3>7-Day Snow Day Forecast</h3>
-                    @if (!string.IsNullOrEmpty(currentCityName))
-                    {
-                        <p class="location-name">📍 @currentCityName</p>
-                    }
-                    @if (activeAlerts.Any())
-                    {
-                        <div class="alerts-section">
-                            @foreach (var alert in activeAlerts)
+        @if (forecasts != null && forecasts.Any())
+        {
+            <div class="forecast-title">
+                <h3>7-Day Snow Day Forecast</h3>
+                @if (!string.IsNullOrEmpty(currentCityName))
+                {
+                    <p class="location-name">📍 @currentCityName</p>
+                }
+                @if (activeAlerts.Any())
+                {
+                    <div class="alerts-section">
+                        @foreach (var alert in activeAlerts)
+                        {
+                            var alertClass = alert.Severity switch
                             {
-                                var alertClass = alert.Severity switch
-                                {
-                                    AlertSeverity.Extreme => "alert-extreme",
-                                    AlertSeverity.Warning => "alert-warning",
-                                    AlertSeverity.Watch => "alert-watch",
-                                    _ => "alert-advisory"
-                                };
+                                AlertSeverity.Extreme => "alert-extreme",
+                                AlertSeverity.Warning => "alert-warning",
+                                AlertSeverity.Watch => "alert-watch",
+                                _ => "alert-advisory"
+                            };
 
-                                <div class="weather-alert @alertClass">
-                                    <div class="alert-icon">⚠️</div>
-                                    <div class="alert-content">
-                                        <div class="alert-title">@alert.Type</div>
-                                        <div class="alert-headline">@alert.Headline</div>
-                                        @if (alert.Expires.HasValue)
-                                        {
-                                            <div class="alert-expires">Until @alert.Expires.Value.ToString("ddd, MMM dd h:mm tt")</div>
-                                        }
-                                    </div>
+                            <div class="weather-alert @alertClass">
+                                <div class="alert-icon">⚠️</div>
+                                <div class="alert-content">
+                                    <div class="alert-title">@alert.Type</div>
+                                    <div class="alert-headline">@alert.Headline</div>
+                                    @if (alert.Expires.HasValue)
+                                    {
+                                        <div class="alert-expires">Until @alert.Expires.Value.ToString("ddd, MMM dd h:mm tt")</div>
+                                    }
                                 </div>
-                            }
-                        </div>
-                    }
-                </div>
-
-                @if (cacheTime.HasValue)
-                {
-                    <div class="last-updated">
-                        Updated: @cacheTime.Value.ToString("h:mm tt")
-                        <br />
-                        <small class="text-muted">Cached for 5 min</small>
-                    </div>
-                }            
-       
-             <div class="forecast-container">
-    @foreach (var forecast in forecasts)
-    {
-        var isWeekend = forecast.Date.DayOfWeek == DayOfWeek.Saturday || 
-                        forecast.Date.DayOfWeek == DayOfWeek.Sunday;
-        
-        <div class="forecast-card" style="border-left: 4px solid @(isWeekend ? "#6c757d" : forecast.ChanceColor)">
-            <div class="forecast-header">
-                <h4>@forecast.DayName</h4>
-                <span class="date">@forecast.Date.ToString("MMM dd")</span>
-            </div>
-            
-            @if (isWeekend)
-            {
-                <!-- Weekend display - no closure/delay predictions -->
-                <div class="weekend-notice">
-                    <div class="weekend-icon">📅</div>
-                    <div class="weekend-text">No School - Weekend</div>
-                </div>
-            }
-            else
-            {
-                <!-- Weekday display - show closure and delay -->
-                <div class="snow-chance" style="border-color: @forecast.ChanceColor">
-                    <div class="chance-type">CLOSURE</div>
-                    <div class="percentage" style="color: @forecast.ChanceColor">@forecast.SnowDayChance%</div>
-                    <div class="chance-label">@forecast.ChanceLevel Chance</div>
-                </div>
-                
-                <div class="delay-chance" style="border-color: @forecast.DelayColor">
-                    <div class="chance-type">DELAY</div>
-                    <div class="percentage" style="color: @forecast.DelayColor">@forecast.DelayChance%</div>
-                    <div class="chance-label">@forecast.DelayLevel Chance</div>
-                </div>
-            }
-            
-            <div class="forecast-details">
-                <div><strong>Temperature:</strong> @forecast.Temperature°F</div>
-                <div><strong>Precipitation:</strong> @forecast.PrecipitationChance%</div>
-                @if (!string.IsNullOrEmpty(forecast.SnowfallAmount))
-                {
-                    <div>
-                        <strong>❄️ Expected Snow: </strong> 
-                        @if (forecast.SnowfallAmount.Contains("\""))
-                        {
-                            <span>@forecast.SnowfallAmount</span>
-                        }
-                        else
-                        {
-                            <span class="qualitative-snow">@forecast.SnowfallAmount amounts</span>
+                            </div>
                         }
                     </div>
                 }
-                <div class="mt-2"><strong>Forecast:</strong> @forecast.Forecast</div>
             </div>
-        </div>
-    }
-</div>
-            }  
-            
+
+            @if (cacheTime.HasValue)
+            {
+                <div class="last-updated">
+                    Updated: @cacheTime.Value.ToString("h:mm tt")
+                    <br />
+                    <small class="text-muted">Cached for 5 min</small>
+                </div>
+            }
+
+            <div class="forecast-container">
+                @foreach (var forecast in forecasts)
+                {
+                    var isWeekend = forecast.Date.DayOfWeek == DayOfWeek.Saturday ||
+                    forecast.Date.DayOfWeek == DayOfWeek.Sunday;
+
+                    <div class="forecast-card" style="border-left: 4px solid @(isWeekend ? "#6c757d" : forecast.ChanceColor)">
+                        <div class="forecast-header">
+                            <h4>@forecast.DayName</h4>
+                            <span class="date">@forecast.Date.ToString("MMM dd")</span>
+                        </div>
+
+                        @if (isWeekend)
+                        {
+                            <!-- Weekend display - no closure/delay predictions -->
+                            <div class="weekend-notice">
+                                <div class="weekend-icon">📅</div>
+                                <div class="weekend-text">No School - Weekend</div>
+                            </div>
+                        }
+                        else
+                        {
+                            <!-- Weekday display - show closure and delay -->
+                            <div class="snow-chance" style="border-color: @forecast.ChanceColor">
+                                <div class="chance-type">CLOSURE</div>
+                                <div class="percentage" style="color: @forecast.ChanceColor">@forecast.SnowDayChance%</div>
+                                <div class="chance-label">@forecast.ChanceLevel Chance</div>
+                            </div>
+
+                            <div class="delay-chance" style="border-color: @forecast.DelayColor">
+                                <div class="chance-type">DELAY</div>
+                                <div class="percentage" style="color: @forecast.DelayColor">@forecast.DelayChance%</div>
+                                <div class="chance-label">@forecast.DelayLevel Chance</div>
+                            </div>
+                        }
+
+                        <div class="forecast-details">
+                            <div><strong>Temperature:</strong> @forecast.Temperature°F</div>
+                            <div><strong>Precipitation:</strong> @forecast.PrecipitationChance%</div>
+                            @if (!string.IsNullOrEmpty(forecast.SnowfallAmount))
+                            {
+                                <div>
+                                    <strong>❄️ Expected Snow: </strong>
+                                    @if (forecast.SnowfallAmount.Contains("\""))
+                                    {
+                                        <span>@forecast.SnowfallAmount</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="qualitative-snow">@forecast.SnowfallAmount amounts</span>
+                                    }
+                                </div>
+                            }
+                            <div class="mt-2"><strong>Forecast:</strong> @forecast.Forecast</div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
     </div>
     <!-- Add version display here -->
     <div class="version-info">
         @if (!string.IsNullOrEmpty(appVersion))
         {
             <span>v@(appVersion)</span>
-        }       
+        }
 
     </div>
 </div>
@@ -183,7 +183,7 @@
     private List<SavedLocation> savedLocations = new();
     private const int MaxSavedLocations = 5;
     private string appVersion = "";
-    private List<WeatherAlert> activeAlerts = new();  
+    private List<WeatherAlert> activeAlerts = new();
 
     // Cache management
     private string? cachedZipCode = null;
@@ -369,7 +369,39 @@
             var historicalWeather = await WeatherService.GetRecentWeather(coords.Value.lat, coords.Value.lon, daysBack: 3);
 
             // Step 3.5: Get active weather alerts
-            activeAlerts = await WeatherService.GetActiveAlerts(coords.Value.lat, coords.Value.lon);
+            var allAlerts = await WeatherService.GetActiveAlerts(coords.Value.lat, coords.Value.lon);
+
+            // Filter to only relevant alerts for the 7-day forecast window
+            var forecastEndDate = DateTime.Today.AddDays(7);
+            activeAlerts = allAlerts.Where(a =>
+            {
+                // Filter out expired alerts
+                if (a.Expires.HasValue && a.Expires.Value < DateTime.Now)
+                {
+                    Console.WriteLine($"Filtering out expired alert: {a.Type}");
+                    return false;
+                }
+
+                // Filter out alerts that don't overlap with our 7-day window
+                var effectiveEnd = a.Ends ?? a.Expires ?? DateTime.MaxValue;
+                var startsAfterWindow = a.Onset.HasValue && a.Onset.Value.Date > forecastEndDate;
+                var endsBeforeWindow = effectiveEnd.Date < DateTime.Today;
+
+                if (startsAfterWindow || endsBeforeWindow)
+                {
+                    Console.WriteLine($"Filtering out alert outside forecast window: {a.Type}");
+                    return false;
+                }
+
+                // Only show advisory-level or higher (filter out statements/outlooks)
+                if (a.Severity < AlertSeverity.Advisory)
+                {
+                    Console.WriteLine($"Filtering out low-severity alert: {a.Type}");
+                    return false;
+                }
+
+                return true;
+            }).ToList();
 
             // Step 4: Determine location (prefer NWS, fallback to geocoding)
             string finalCity = "";
@@ -483,7 +515,30 @@
                 var historicalWeather = await WeatherService.GetRecentWeather(position.Latitude, position.Longitude, daysBack: 3);
 
                 // Get active weather alerts
-                activeAlerts = await WeatherService.GetActiveAlerts(position.Latitude, position.Longitude);
+                var allAlertsForLocation = await WeatherService.GetActiveAlerts(position.Latitude, position.Longitude);
+
+                // Filter to only relevant alerts for the 7-day forecast window
+                var forecastEndDate = DateTime.Today.AddDays(7);
+                activeAlerts = allAlertsForLocation.Where(a =>
+                {
+                    // Filter out expired alerts
+                    if (a.Expires.HasValue && a.Expires.Value < DateTime.Now)
+                        return false;
+
+                    // Filter out alerts that don't overlap with our 7-day window
+                    var effectiveEnd = a.Ends ?? a.Expires ?? DateTime.MaxValue;
+                    var startsAfterWindow = a.Onset.HasValue && a.Onset.Value.Date > forecastEndDate;
+                    var endsBeforeWindow = effectiveEnd.Date < DateTime.Today;
+
+                    if (startsAfterWindow || endsBeforeWindow)
+                        return false;
+
+                    // Only show advisory-level or higher
+                    if (a.Severity < AlertSeverity.Advisory)
+                        return false;
+
+                    return true;
+                }).ToList();
 
                 // Use NWS data if available, otherwise geocode
                 string finalCity = nwsCity;
@@ -777,6 +832,7 @@
         font-size: 0.75rem;
         margin-top: 2rem;
     }
+
     .alerts-section {
         margin: 1rem 0;
     }

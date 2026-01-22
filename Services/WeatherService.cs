@@ -174,6 +174,10 @@ namespace SnowDayPredictor.Services
                     Console.WriteLine($"Forecast aftermath: +{forecastAftermath.ClosureChance}% closure, +{forecastAftermath.DelayChance}% delay");
                 }
 
+                // CRITICAL: Update allDays with final values so next iterations can see the aftermath-adjusted closure
+                // This allows Tuesday to see Monday's 95% (from Sunday aftermath), not Monday's direct 0%
+                allDays[i] = (current.period, finalClosure, finalDelay, current.snowfall, current.display);
+
                 bool isSchoolDay = IsSchoolDay(currentDate);
 
                 // OUTPUT ALL days (including weekends) so the UI can show them
@@ -242,24 +246,34 @@ namespace SnowDayPredictor.Services
                     bool bigModeledImpact = previousDay.closure >= 70 && (previousDay.snowfall >= 0.5 || isIceHeavy);
                     bool iceCarry = isIceHeavy && coldPersistsForCarry;
 
+                    // Require actual winter evidence to allow weekend anchoring
                     if (!(bigSnow || bigModeledImpact || iceCarry))
                         continue;
 
-                    // Mon/Tue always allowed for unprepared, but Wed only if sticky and cold persists
-                    bool allowDay1or2 = prevIsSunday && currIsSchoolDay && (daysSince == 1 || daysSince == 2);
+                    // Day 1 (Monday from Sunday): require either significant snow OR ice with cold persistence
+                    bool allowDay1 = prevIsSunday && currIsSchoolDay && daysSince == 1 &&
+                                     (bigSnow || bigModeledImpact || iceCarry);
 
+                    // Day 2 (Tuesday from Sunday): require strong evidence
+                    // For unprepared regions (TX/South), ice events can persist even with less snow
+                    bool allowDay2 = prevIsSunday && currIsSchoolDay && daysSince == 2 &&
+                                     (bigSnow ||                                    // Major snow event
+                                      (iceCarry && previousDay.snowfall >= 0.5) ||  // Ice + any snow + cold
+                                      (bigModeledImpact && coldPersistsForCarry));  // High modeled impact + cold
+
+                    // Day 3 (Wednesday from Sunday): requires major event in unprepared areas
                     bool allowDay3Sticky =
                         prevIsSunday &&
                         currIsSchoolDay &&
                         daysSince == 3 &&
                         coldPersistsForCarry &&
-                        (isIceHeavy || previousDay.snowfall >= 4.0) &&
-                        preparedness <= 0.20;
+                        ((isIceHeavy && previousDay.snowfall >= 0.5) || previousDay.snowfall >= 4.0) &&
+                        preparedness <= 0.35;  // Widen from 0.20 to catch more of the South
 
-                    if (!(allowDay1or2 || allowDay3Sticky))
+                    if (!(allowDay1 || allowDay2 || allowDay3Sticky))
                         continue;
 
-                    Console.WriteLine($"Weekend anchor allowed: Sunday event plausibly impacts {currentDate:MM/dd} (daysSince={daysSince})");
+                    Console.WriteLine($"Weekend anchor allowed: Sunday event impacts {currentDate:MM/dd} (daysSince={daysSince}, snow={previousDay.snowfall:F1}\", ice={isIceHeavy}, closure={previousDay.closure}%)");
                 }
 
 
@@ -281,7 +295,45 @@ namespace SnowDayPredictor.Services
                 bool prevIceHeavy = LooksLikeStickyWinterHazard(prevForecastLower);
 
                 // Prevent "ghost storm" anchors: no snow + not ice-heavy = not an event day
-                if (previousDay.snowfall < 0.5 && !prevIceHeavy)
+                // UNLESS the previous day has very high closure (which means it got aftermath from an earlier event)
+                bool hasHighClosureFromEarlierEvent = previousDay.closure >= 70;
+
+                // CRITICAL FIX: Only allow DIRECT carryover to prevent feedback loops
+                // If previous day had no snow/ice but high closure, only allow if daysSince == 1
+                if (previousDay.snowfall < 0.5 && !prevIceHeavy && hasHighClosureFromEarlierEvent)
+                {
+                    // Only allow direct carryover (look at immediate previous day)
+                    // Block chained carryover (Monday→Tuesday→Wednesday where Wed looks at Tue's carryover)
+                    if (daysSince > 1)
+                    {
+                        Console.WriteLine($"Blocking chained carryover: {previousDate:MM/dd} (daysSince={daysSince}) had no snow/ice");
+                        continue;
+                    }
+
+                    // For daysSince == 1, verify there's a real event within last 2 days FROM THE CARRYOVER DAY
+                    // We need to look back from where previousDay is, not from currentIndex
+                    int previousDayIndex = currentIndex - lookback;
+                    bool foundRealEventRecently = false;
+
+                    for (int lookbackCheck = 1; lookbackCheck <= Math.Min(2, previousDayIndex); lookbackCheck++)
+                    {
+                        var checkDay = forecastDays[previousDayIndex - lookbackCheck];
+                        if (checkDay.snowfall >= 0.5 || LooksLikeStickyWinterHazard((checkDay.period.DetailedForecast ?? "").ToLowerInvariant()))
+                        {
+                            foundRealEventRecently = true;
+                            Console.WriteLine($"Found real event on {checkDay.period.StartTime:MM/dd} supporting carryover from {previousDate:MM/dd}");
+                            break;
+                        }
+                    }
+
+                    if (!foundRealEventRecently)
+                    {
+                        Console.WriteLine($"Blocking carryover: no real event found within 2 days before {previousDate:MM/dd}");
+                        continue;
+                    }
+                }
+
+                if (previousDay.snowfall < 0.5 && !prevIceHeavy && !hasHighClosureFromEarlierEvent)
                     continue;
 
                 // Cold persistence across the window from event -> current day
@@ -298,10 +350,11 @@ namespace SnowDayPredictor.Services
 
                 double prevIceInches = InferIceAmountInches(previousDay.period);
                 bool winterEvidence = HasRealWinterEvidence(previousDay.period, previousDay.snowfall, prevIceInches)
-                                      || LooksLikeStickyWinterHazard((previousDay.period.DetailedForecast ?? "").ToLowerInvariant());
+                                      || LooksLikeStickyWinterHazard((previousDay.period.DetailedForecast ?? "").ToLowerInvariant())
+                                      || hasHighClosureFromEarlierEvent;  // Allow carryover days to propagate
 
                 // If there isn't real winter evidence, this day cannot create multi-day aftermath.
-                // This prevents “Watch stacking” from making VA look like TX.
+                // This prevents "Watch stacking" from making VA look like TX.
                 if (!winterEvidence)
                     continue;
 
@@ -344,7 +397,6 @@ namespace SnowDayPredictor.Services
                 int currHigh = forecastDays[currentIndex].period.Temperature;
 
                 // Simple melt factor: above freezing = faster cleanup.
-                // Tune these numbers to taste.
                 double meltFactor =
                     currHigh >= 45 ? 0.25 :
                     currHigh >= 40 ? 0.35 :
@@ -352,8 +404,13 @@ namespace SnowDayPredictor.Services
                     currHigh >= 33 ? 0.75 :
                                      1.00;
 
-                // Only apply melt after day 1. Day 1 is usually chaos regardless.
-                if (daysSince >= 2)
+                // Apply melt factor in two cases:
+                // 1. daysSince >= 2 from the original event
+                // 2. daysSince == 1 BUT the previous day was a carryover day (no actual snow/ice)
+                bool previousWasCarryover = previousDay.snowfall < 0.5 && !prevIceHeavy && previousDay.closure >= 70;
+                bool shouldApplyMelt = daysSince >= 2 || (daysSince == 1 && previousWasCarryover);
+
+                if (shouldApplyMelt)
                 {
                     closureAftermath = (int)Math.Round(closureAftermath * meltFactor);
                     delayAftermath = (int)Math.Round(delayAftermath * Math.Min(1.0, meltFactor * 1.15));
@@ -361,12 +418,46 @@ namespace SnowDayPredictor.Services
 
                 if (preparedness <= 0.20)
                 {
-                    // Only if prior day was a real winter event
-                    bool realEvent = previousDay.snowfall >= 1.0 || prevIceHeavy || previousDay.closure >= 85;
-                    if (realEvent)
+                    // Only if prior day was a REAL winter event (not just high closure from carryover)
+                    // Check if the event had actual snow OR ice, not just inherited closure
+                    bool hadActualWinterWeather = previousDay.snowfall >= 1.0 || prevIceHeavy;
+
+                    // For carryover days (no snow/ice but high closure), only apply floor if it's
+                    // within 1 day of the REAL event (prevents floor from applying to chains)
+                    bool isCarryoverDay = previousDay.snowfall < 0.5 && !prevIceHeavy && previousDay.closure >= 70;
+                    bool allowCarryoverFloor = false;
+
+                    if (isCarryoverDay && daysSince == 1)
+                    {
+                        // Check if the carryover day is within 1 day of a real event
+                        int previousDayIndex = currentIndex - lookback;
+                        if (previousDayIndex >= 1)
+                        {
+                            var dayBefore = forecastDays[previousDayIndex - 1];
+                            if (dayBefore.snowfall >= 0.5 || LooksLikeStickyWinterHazard((dayBefore.period.DetailedForecast ?? "").ToLowerInvariant()))
+                            {
+                                allowCarryoverFloor = true;
+                            }
+                        }
+                    }
+
+                    if (hadActualWinterWeather || allowCarryoverFloor)
                     {
                         int floorClosure = daysSince switch { 1 => 90, 2 => 70, 3 => 35, _ => 0 };
                         int floorDelay = daysSince switch { 1 => 85, 2 => 75, 3 => 45, _ => 0 };
+
+                        // CRITICAL: On warm days (38°F+), reduce the floor to allow melt to have some effect
+                        // But don't eliminate it completely - TX schools still close even when warming
+                        if (currHigh >= 38 && shouldApplyMelt)
+                        {
+                            // Reduce floor by temperature
+                            double warmReduction = currHigh >= 45 ? 0.50 :  // 50% reduction at 45°F+
+                                                   currHigh >= 42 ? 0.60 :  // 40% reduction at 42-44°F
+                                                                    0.70;   // 30% reduction at 38-41°F
+
+                            floorClosure = (int)Math.Round(floorClosure * warmReduction);
+                            floorDelay = (int)Math.Round(floorDelay * warmReduction);
+                        }
 
                         closureAftermath = Math.Max(closureAftermath, floorClosure);
                         delayAftermath = Math.Max(delayAftermath, floorDelay);
@@ -1013,7 +1104,7 @@ namespace SnowDayPredictor.Services
 
             return 0.5; // Trace
         }
-     
+
 
         private void ApplyMultiDayClosures(List<SnowDayForecast> forecasts, GeographyContext geography)
         {
@@ -1471,7 +1562,7 @@ namespace SnowDayPredictor.Services
                         Description = props.Description,
                         Onset = props.Onset,
                         Expires = props.Expires,
-                        Ends = props.Ends,  
+                        Ends = props.Ends,
                         Severity = DetermineAlertSeverity(props.Event)
                     };
 
@@ -1506,7 +1597,7 @@ namespace SnowDayPredictor.Services
             {
                 return AlertSeverity.Warning;
             }
-            
+
             // Watches         
             if (lowerEvent.Contains("winter storm watch") ||
                 lowerEvent.Contains("blizzard watch") ||
