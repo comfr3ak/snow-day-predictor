@@ -132,55 +132,86 @@
         public string State { get; set; } = "";
         public double Latitude { get; set; }
 
-        // Snow tolerance based on state/region
-        // Snow tolerance based on region
-        public int SnowToleranceMultiplier => State.ToUpper() switch
+        // Derived regional impact from latitude.
+        // 1.0 = baseline, >1.0 = lower-latitude (less tolerant), <1.0 = higher-latitude (more tolerant)
+        public double LatitudeImpactFactor => Latitude switch
         {
-            // Deep South - very low tolerance
-            "FL" or "GA" or "SC" or "AL" or "MS" or "LA" or "TX" or "AR" => 200,
-
-            // Mid-South + DC Metro - low tolerance, extended recovery
-            "NC" or "TN" or "KY" or "VA" or "MD" or "WV" or "OK" => 150,
-
-            // Mid-Atlantic/Lower Midwest - moderate tolerance
-            "DE" or "PA" or "MO" or "KS" => 100,
-
-            // Southern portions of these states
-            "OH" or "IN" => 100,
-
-            // Northeast Corridor - high tolerance
-            "NJ" or "NY" or "CT" or "MA" or "RI" => 75,
-
-            // Northern/Mountain states - very high tolerance
-            "VT" or "NH" or "ME" or "MI" or "WI" or "IL" or "IA" or "MN" => 50,
-            "MT" or "WY" or "CO" or "ID" or "ND" or "SD" or "AK" or "UT" => 50,
-
-            // West Coast (rare snow, but cities struggle)
-            "WA" or "OR" or "CA" => 150,
-            "NV" or "AZ" or "NM" => 175,
-
-            _ => 100 // Default
+            < 28.0 => 2.00,  // South FL / far South TX
+            < 30.0 => 1.85,  // Gulf Coast band
+            < 32.5 => 1.65,  // Deep South band
+            < 35.0 => 1.45,  // Southern tier
+            < 38.0 => 1.25,  // VA/MD-ish
+            < 41.0 => 1.05,  // Mid band
+            < 44.0 => 0.95,  // Great Lakes / upstate
+            < 47.0 => 0.85,  // Northern tier
+            _ => 0.75        // far north
         };
 
-        // How many days closures typically persist
-        public int TypicalClosureDays => State.ToUpper() switch
+        public int SnowToleranceMultiplier
         {
-            "FL" or "GA" or "SC" or "AL" or "MS" or "LA" or "TX" or "AR" => 3,
-            "NC" or "TN" or "KY" or "VA" or "WV" => 2,
-            _ => 1
-        };
+            get
+            {
+                // Lower preparedness => multiplier > 100 (more closure prone)
+                // Higher preparedness => multiplier < 100 (less closure prone)
+                // Range roughly 60..200
+                double p = PreparednessIndex;           // 0..1
+                double multiplier = 200 - (140 * p);    // p=0 ->200, p=1 ->60
+                return (int)Math.Round(multiplier);
+            }
+        }
 
-        // Historical weather data
+        public int TypicalClosureDays
+        {
+            get
+            {
+                // Recovery is slower in low preparedness areas, faster in high preparedness areas
+                double p = PreparednessIndex;
+                if (p < 0.20) return 4;   // deep south-like
+                if (p < 0.40) return 3;   // southern tier
+                if (p < 0.65) return 3;   // transition zones (VA often behaves like this for big storms)
+                if (p < 0.85) return 2;   // northern mid-atlantic / midwest
+                return 1;                 // far north
+            }
+        }
+
+
+        public double PreparednessIndex
+        {
+            get
+            {
+                // Typical US snow preparedness rises with latitude.
+                // 0.0 = very unprepared, 1.0 = very prepared.
+                // Center around ~40.5 (roughly Mid-Atlantic transition), span ~6 degrees.
+                double x = (Latitude - 40.5) / 6.0;
+
+                // Smoothstep-ish sigmoid
+                double sigmoid = 1.0 / (1.0 + Math.Exp(-x * 2.2));
+
+                // Clamp
+                if (sigmoid < 0) sigmoid = 0;
+                if (sigmoid > 1) sigmoid = 1;
+                return sigmoid;
+            }
+        }
+
+
+
+        // Optional helpers you can use elsewhere if you want ice to weigh more than snow at low latitudes.
+        // These are not required by your current code, but they are useful for future tuning.
+        public double IceAmplifier => 1.0 + System.Math.Max(0.0, LatitudeImpactFactor - 1.0) * 0.60;
+        public double SnowAmplifier => 1.0 + System.Math.Max(0.0, LatitudeImpactFactor - 1.0) * 0.30;
+
+        // Keep compatibility with existing imports:
+        // using static SnowDayPredictor.Models.GeographyContext;
         public class HistoricalWeatherDay
         {
-            public DateTime Date { get; set; }
+            public System.DateTime Date { get; set; }
             public double SnowfallInches { get; set; }
             public double TempMax { get; set; }
             public double TempMin { get; set; }
             public double Precipitation { get; set; }
         }
 
-        // Open-Meteo API response models
         public class OpenMeteoHistoricalResponse
         {
             [System.Text.Json.Serialization.JsonPropertyName("daily")]
@@ -190,21 +221,22 @@
         public class DailyData
         {
             [System.Text.Json.Serialization.JsonPropertyName("time")]
-            public List<string> Time { get; set; } = new();
+            public System.Collections.Generic.List<string> Time { get; set; } = new();
 
             [System.Text.Json.Serialization.JsonPropertyName("snowfall_sum")]
-            public List<double> SnowfallSum { get; set; } = new();
+            public System.Collections.Generic.List<double> SnowfallSum { get; set; } = new();
 
             [System.Text.Json.Serialization.JsonPropertyName("temperature_2m_max")]
-            public List<double> TempMax { get; set; } = new();
+            public System.Collections.Generic.List<double> TempMax { get; set; } = new();
 
             [System.Text.Json.Serialization.JsonPropertyName("temperature_2m_min")]
-            public List<double> TempMin { get; set; } = new();
+            public System.Collections.Generic.List<double> TempMin { get; set; } = new();
 
             [System.Text.Json.Serialization.JsonPropertyName("precipitation_sum")]
-            public List<double> PrecipitationSum { get; set; } = new();
+            public System.Collections.Generic.List<double> PrecipitationSum { get; set; } = new();
         }
     }
+
 
     // NWS Weather Alerts
     public class NWSAlertsResponse
