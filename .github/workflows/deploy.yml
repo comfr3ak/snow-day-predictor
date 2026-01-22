@@ -44,6 +44,24 @@ jobs:
           } | ConvertTo-Json
           $versionJson | Set-Content "release/wwwroot/version.json"
         shell: pwsh
+
+      - name: Generate version.js
+        run: |
+          $version = Get-Date -Format "yyyy.MM.dd.HHmm"
+          $versionJs = @"
+          export async function getVersion() {
+              try {
+                  const response = await fetch('version.json');
+                  const data = await response.json();
+                  return data.version;
+              } catch (error) {
+                  console.error('Version load error:', error);
+                  return '$version';
+              }
+          }
+          "@
+          $versionJs | Set-Content "release/wwwroot/version.js"
+        shell: pwsh
         
       - name: Add .nojekyll
         run: touch release/wwwroot/.nojekyll
