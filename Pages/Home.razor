@@ -4,6 +4,7 @@
 @using SnowDayPredictor.Pages
 @inject WeatherService WeatherService
 @inject IJSRuntime JSRuntime
+@inject HttpClient Http
 
 <PageTitle>Snow Day Predictor</PageTitle>
 
@@ -63,6 +64,33 @@
                     @if (!string.IsNullOrEmpty(currentCityName))
                     {
                         <p class="location-name">📍 @currentCityName</p>
+                    }
+                    @if (activeAlerts.Any())
+                    {
+                        <div class="alerts-section">
+                            @foreach (var alert in activeAlerts)
+                            {
+                                var alertClass = alert.Severity switch
+                                {
+                                    AlertSeverity.Extreme => "alert-extreme",
+                                    AlertSeverity.Warning => "alert-warning",
+                                    AlertSeverity.Watch => "alert-watch",
+                                    _ => "alert-advisory"
+                                };
+
+                                <div class="weather-alert @alertClass">
+                                    <div class="alert-icon">⚠️</div>
+                                    <div class="alert-content">
+                                        <div class="alert-title">@alert.Type</div>
+                                        <div class="alert-headline">@alert.Headline</div>
+                                        @if (alert.Expires.HasValue)
+                                        {
+                                            <div class="alert-expires">Until @alert.Expires.Value.ToString("ddd, MMM dd h:mm tt")</div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
                     }
                 </div>
 
@@ -133,7 +161,16 @@
         </div>
     }
 </div>
-            }        
+            }  
+            
+    </div>
+    <!-- Add version display here -->
+    <div class="version-info">
+        @if (!string.IsNullOrEmpty(appVersion))
+        {
+            <span>v@(appVersion)</span>
+        }       
+
     </div>
 </div>
 
@@ -145,6 +182,8 @@
     private List<SnowDayForecast>? forecasts = null;
     private List<SavedLocation> savedLocations = new();
     private const int MaxSavedLocations = 5;
+    private string appVersion = "";
+    private List<WeatherAlert> activeAlerts = new();  
 
     // Cache management
     private string? cachedZipCode = null;
@@ -166,6 +205,36 @@
             zipCode = lastLocation.ZipCode;
             await GetForecast();
         }
+
+        await LoadVersion();
+    }
+
+    private async Task LoadVersion()
+    {
+        try
+        {
+            var module = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./version.js");
+            appVersion = await module.InvokeAsync<string>("getVersion");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Could not load version: {ex.Message}");
+
+#if DEBUG
+        appVersion = "dev-local";
+#else
+            appVersion = "unknown";
+#endif
+        }
+    }
+
+    public class VersionInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("version")]
+        public string Version { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("buildDate")]
+        public string BuildDate { get; set; } = "";
     }
 
     private async Task RefreshForecast()
@@ -299,6 +368,9 @@
             // Step 3: Get historical weather data (last 3 days)
             var historicalWeather = await WeatherService.GetRecentWeather(coords.Value.lat, coords.Value.lon, daysBack: 3);
 
+            // Step 3.5: Get active weather alerts
+            activeAlerts = await WeatherService.GetActiveAlerts(coords.Value.lat, coords.Value.lon);
+
             // Step 4: Determine location (prefer NWS, fallback to geocoding)
             string finalCity = "";
             string finalState = nwsState; // NWS state is most reliable
@@ -342,8 +414,8 @@
 
             Console.WriteLine($"Geography - State: {geography.State}, Tolerance: {geography.SnowToleranceMultiplier}%");
 
-            // Step 6: Calculate snow day chances WITH historical context
-            forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography, historicalWeather);
+            // Step 6: Calculate snow day chances WITH historical context AND alerts
+            forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography, historicalWeather, activeAlerts);
 
             if (!forecasts.Any())
             {
@@ -410,6 +482,9 @@
                 // Get historical weather data (last 3 days)
                 var historicalWeather = await WeatherService.GetRecentWeather(position.Latitude, position.Longitude, daysBack: 3);
 
+                // Get active weather alerts
+                activeAlerts = await WeatherService.GetActiveAlerts(position.Latitude, position.Longitude);
+
                 // Use NWS data if available, otherwise geocode
                 string finalCity = nwsCity;
                 string finalState = nwsState;
@@ -434,7 +509,7 @@
                 Console.WriteLine($"Location-based geography - State: {geography.State}, Tolerance: {geography.SnowToleranceMultiplier}%");
 
                 // Calculate snow day chances WITH historical context
-                forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography, historicalWeather);
+                forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography, historicalWeather, activeAlerts);
 
                 if (!forecasts.Any())
                 {
@@ -482,6 +557,8 @@
         public double Latitude { get; set; }
         public double Longitude { get; set; }
     }
+
+
 }
 
 <style>
@@ -691,5 +768,73 @@
         font-size: 1.1rem;
         font-weight: 600;
         color: #6c757d;
+    }
+
+    .version-info {
+        text-align: center;
+        padding: 1rem;
+        color: #999;
+        font-size: 0.75rem;
+        margin-top: 2rem;
+    }
+    .alerts-section {
+        margin: 1rem 0;
+    }
+
+    .weather-alert {
+        display: flex;
+        align-items: flex-start;
+        gap: 1rem;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 0.75rem;
+        border-left: 4px solid;
+    }
+
+    .alert-extreme {
+        background: #ffe6e6;
+        border-left-color: #dc3545;
+    }
+
+    .alert-warning {
+        background: #fff3cd;
+        border-left-color: #ff8c00;
+    }
+
+    .alert-watch {
+        background: #cfe2ff;
+        border-left-color: #0d6efd;
+    }
+
+    .alert-advisory {
+        background: #d1ecf1;
+        border-left-color: #17a2b8;
+    }
+
+    .alert-icon {
+        font-size: 1.5rem;
+        line-height: 1;
+    }
+
+    .alert-content {
+        flex: 1;
+    }
+
+    .alert-title {
+        font-weight: 700;
+        font-size: 1rem;
+        margin-bottom: 0.25rem;
+    }
+
+    .alert-headline {
+        font-size: 0.9rem;
+        line-height: 1.4;
+        margin-bottom: 0.25rem;
+    }
+
+    .alert-expires {
+        font-size: 0.75rem;
+        color: #666;
+        font-style: italic;
     }
 </style>

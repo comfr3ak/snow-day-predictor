@@ -109,9 +109,10 @@ namespace SnowDayPredictor.Services
 
 
         public List<SnowDayForecast> CalculateSnowDayChances(
-    NWSForecastResponse forecast,
-    GeographyContext geography,
-    List<HistoricalWeatherDay> recentHistory)
+        NWSForecastResponse forecast,
+        GeographyContext geography,
+        List<HistoricalWeatherDay> recentHistory,
+        List<WeatherAlert> activeAlerts)
         {
             var results = new List<SnowDayForecast>();
             var periods = forecast.Properties.Periods.ToList();
@@ -133,7 +134,7 @@ namespace SnowDayPredictor.Services
                 Console.WriteLine($"\n=== Analyzing: {period.Name} ({period.StartTime:MM/dd}) {(isWeekend ? "[WEEKEND]" : "")} ===");
 
                 Period? nightBefore = i > 0 && !periods[i - 1].IsDaytime ? periods[i - 1] : null;
-                var analysis = AnalyzePeriod(period, nightBefore, geography);
+                var analysis = AnalyzePeriod(period, nightBefore, geography, activeAlerts);
 
                 allDays.Add((period, analysis.ClosureChance, analysis.DelayChance,
                             analysis.SnowfallInches, analysis.SnowfallDisplay));
@@ -153,7 +154,7 @@ namespace SnowDayPredictor.Services
                 var historicalAftermath = CalculateAftermathImpact(currentDate, recentHistory, geography);
 
                 // Check forecast-based aftermath (look backward at ALL previous days, including weekends)
-                var forecastAftermath = CalculateForecastAftermath(i, allDays, geography);
+                var forecastAftermath = CalculateForecastAftermath(i, allDays, geography, activeAlerts);
 
                 // Take the maximum of all impacts
                 var finalClosure = Math.Max(current.closure,
@@ -196,9 +197,10 @@ namespace SnowDayPredictor.Services
 
 
         private (int ClosureChance, int DelayChance) CalculateForecastAftermath(
-    int currentIndex,
-    List<(Period period, int closure, int delay, double snowfall, string? display)> forecastDays,
-    GeographyContext geography)
+            int currentIndex,
+            List<(Period period, int closure, int delay, double snowfall, string? display)> forecastDays,
+            GeographyContext geography,
+            List<WeatherAlert> activeAlerts)
         {
             int maxClosureAftermath = 0;
             int maxDelayAftermath = 0;
@@ -214,6 +216,36 @@ namespace SnowDayPredictor.Services
                 // Only consider if it was a significant event
                 bool significantEvent = previousDay.closure >= 70 || previousDay.snowfall >= 4.0;
 
+                // Detect MAJOR events (8+ inches or 85%+ closure)
+                bool majorEvent = previousDay.snowfall >= 8.0 || previousDay.closure >= 85;
+
+                // Check if there was an active watch or warning during the event
+                bool hadActiveAlert = activeAlerts.Any(a =>
+                {
+                    if (a.Severity < AlertSeverity.Watch) return false;  // Include watches and warnings
+                    if (!a.Onset.HasValue) return false;
+
+                    DateTime effectiveEnd = a.Ends ?? a.Expires ?? DateTime.MaxValue;
+
+                    return previousDate >= a.Onset.Value.Date &&
+                           previousDate <= effectiveEnd.Date;
+                });
+
+                // For major events, treat watches like warnings (they usually upgrade)
+                bool hadMajorEventWithAlert = hadActiveAlert && majorEvent;
+
+                if (hadActiveAlert && !significantEvent)
+                {
+                    significantEvent = previousDay.closure >= 60 || previousDay.snowfall >= 3.0;
+                    Console.WriteLine("Active alert lowers threshold for significant event");
+                }
+
+                // Log major events
+                if (hadMajorEventWithAlert)
+                {
+                    Console.WriteLine($"MAJOR EVENT with official alert: {previousDay.snowfall:F1}\" snow, {previousDay.closure}% closure");
+                }
+
                 if (!significantEvent) continue;
 
                 Console.WriteLine($"Found significant event on {previousDate:MM/dd}: {previousDay.snowfall:F1}\" snow, {previousDay.closure}% closure");
@@ -224,97 +256,154 @@ namespace SnowDayPredictor.Services
                 int closureAftermath = 0;
                 int delayAftermath = 0;
 
-                // Calculate base aftermath
+                // Calculate base aftermath - MAJOR EVENT AWARE
                 if (daysSince == 1) // Day after event
                 {
-                    if (previousDay.snowfall >= 8 || previousDay.closure >= 80)
+                    if (majorEvent)
                     {
-                        closureAftermath = 60;
-                        delayAftermath = 75;
+                        closureAftermath = hadMajorEventWithAlert ? 70 : 60;
+                        delayAftermath = hadMajorEventWithAlert ? 85 : 75;
                     }
-                    else if (previousDay.snowfall >= 6 || previousDay.closure >= 70)
+                    else if (previousDay.snowfall >= 6 || previousDay.closure >= 75)
                     {
-                        closureAftermath = 45;
+                        closureAftermath = 50;
                         delayAftermath = 65;
                     }
-                    else
-                    {
-                        closureAftermath = 30;
-                        delayAftermath = 55;
-                    }
-                }
-                else if (daysSince == 2) // 2 days after
-                {
-                    if (previousDay.snowfall >= 8)
+                    else if (previousDay.closure >= 70)
                     {
                         closureAftermath = 35;
                         delayAftermath = 55;
                     }
                     else
                     {
+                        closureAftermath = 25;
+                        delayAftermath = 45;
+                    }
+                }
+                else if (daysSince == 2) // 2 days after
+                {
+                    if (majorEvent)
+                    {
+                        closureAftermath = hadMajorEventWithAlert ? 70 : 60;
+                        delayAftermath = hadMajorEventWithAlert ? 85 : 75;
+                    }
+                    else if (previousDay.snowfall >= 6)
+                    {
+                        closureAftermath = 35;
+                        delayAftermath = 50;
+                    }
+                    else
+                    {
                         closureAftermath = 20;
-                        delayAftermath = 40;
+                        delayAftermath = 35;
                     }
                 }
                 else if (daysSince == 3) // 3 days after
                 {
-                    if (previousDay.snowfall >= 8)
+                    if (majorEvent)
                     {
-                        closureAftermath = 20;
-                        delayAftermath = 40;
+                        closureAftermath = hadMajorEventWithAlert ? 35 : 25;  // Reduced from 45/35
+                        delayAftermath = hadMajorEventWithAlert ? 50 : 40;    // Reduced from 60/50
+                    }
+                    else if (previousDay.snowfall >= 6)
+                    {
+                        closureAftermath = 18;
+                        delayAftermath = 30;
                     }
                     else
                     {
-                        closureAftermath = 10;
-                        delayAftermath = 25;
+                        closureAftermath = 8;
+                        delayAftermath = 18;
                     }
                 }
                 else if (daysSince == 4) // 4 days after
                 {
-                    if (previousDay.snowfall >= 8)
+                    if (majorEvent)
                     {
-                        closureAftermath = 10;
-                        delayAftermath = 25;
+                        closureAftermath = hadMajorEventWithAlert ? 25 : 18;  // Reduced from 30/20
+                        delayAftermath = hadMajorEventWithAlert ? 38 : 30;    // Reduced from 45/35
+                    }
+                    else if (previousDay.snowfall >= 8)
+                    {
+                        closureAftermath = 8;
+                        delayAftermath = 18;
                     }
                     else
                     {
                         closureAftermath = 5;
-                        delayAftermath = 15;
+                        delayAftermath = 10;
                     }
                 }
                 else if (daysSince == 5) // 5 days after (rare)
                 {
-                    if (previousDay.snowfall >= 10)
+                    if (majorEvent && hadMajorEventWithAlert)
+                    {
+                        closureAftermath = 15;
+                        delayAftermath = 25;
+                    }
+                    else if (previousDay.snowfall >= 10)
                     {
                         closureAftermath = 5;
-                        delayAftermath = 15;
+                        delayAftermath = 12;
                     }
                 }
 
-                // CRITICAL: Cold temps extend impact significantly
+                // Cold temps extend impact
                 if (coldPersists)
                 {
-                    delayAftermath = (int)(delayAftermath * 1.4); // 40% boost for delays
-                    closureAftermath = (int)(closureAftermath * 1.2); // 20% boost for closures
+                    delayAftermath = (int)(delayAftermath * 1.25);
+                    closureAftermath = (int)(closureAftermath * 1.15);
                     Console.WriteLine($"Cold temps persisting - boosting aftermath impact");
                 }
 
-                // Geography adjustment
-                if (geography.SnowToleranceMultiplier >= 150) // Mid-South and lower
+                // Geography adjustment - REGIONAL
+                if (geography.SnowToleranceMultiplier >= 200) // Deep South
                 {
-                    closureAftermath = (int)(closureAftermath * 1.4);
-                    delayAftermath = (int)(delayAftermath * 1.3);
+                    if (majorEvent)
+                    {
+                        closureAftermath = (int)(closureAftermath * 2.0);
+                        delayAftermath = (int)(delayAftermath * 1.8);
+                    }
+                    else
+                    {
+                        closureAftermath = (int)(closureAftermath * 1.7);
+                        delayAftermath = (int)(delayAftermath * 1.5);
+                    }
                 }
-                else if (geography.SnowToleranceMultiplier >= 200) // Deep South
+                else if (geography.SnowToleranceMultiplier >= 150) // Mid-South (VA, MD, etc.)
                 {
-                    closureAftermath = (int)(closureAftermath * 1.8);
-                    delayAftermath = (int)(delayAftermath * 1.5);
+                    if (majorEvent)
+                    {
+                        closureAftermath = (int)(closureAftermath * 1.4);
+                        delayAftermath = (int)(delayAftermath * 1.3);
+                    }
+                    else
+                    {
+                        closureAftermath = (int)(closureAftermath * 1.2);
+                        delayAftermath = (int)(delayAftermath * 1.15);
+                    }
                 }
-                else if (geography.SnowToleranceMultiplier <= 75) // High tolerance areas
+                else if (geography.SnowToleranceMultiplier <= 75) // Northern regions
                 {
-                    closureAftermath = (int)(closureAftermath * 0.7);
+                    closureAftermath = (int)(closureAftermath * 0.75);
                     delayAftermath = (int)(delayAftermath * 0.8);
                 }
+
+                // Cap individual aftermath contributions based on days since event
+                // This allows Day 1-2 to be high while ensuring Day 3+ decays naturally
+                int closureCap = daysSince switch
+                {
+                    1 => 85,  // Day 1: High impacts expected
+                    2 => 80,  // Day 2: Still very high
+                    3 => 70,  // Day 3: Starting to improve
+                    4 => 60,  // Day 4: Continued improvement
+                    _ => 50   // Day 5+: Lower impacts
+                };
+
+                int delayCap = closureCap + 5;  // Delays tend to persist slightly longer
+
+                closureAftermath = Math.Min(closureAftermath, closureCap);
+                delayAftermath = Math.Min(delayAftermath, delayCap);
 
                 // Track the maximum aftermath from any previous event
                 maxClosureAftermath = Math.Max(maxClosureAftermath, closureAftermath);
@@ -443,7 +532,7 @@ namespace SnowDayPredictor.Services
         }
 
         private (int ClosureChance, int DelayChance, double SnowfallInches, string? SnowfallDisplay) AnalyzePeriod(
-           Period day, Period? nightBefore, GeographyContext geography)
+            Period day, Period? nightBefore, GeographyContext geography, List<WeatherAlert> activeAlerts)
         {
             int closureChance = 0;
             int delayChance = 0;
@@ -508,6 +597,41 @@ namespace SnowDayPredictor.Services
 
                 // Geography adjustment
                 closureChance = (closureChance * geography.SnowToleranceMultiplier) / 100;
+
+                // Apply alert bonuses
+                foreach (var alert in activeAlerts)
+                {
+                    // Use 'Ends' if available (actual event end), otherwise fall back to 'Expires'
+                    DateTime effectiveEnd = alert.Ends ?? alert.Expires ?? DateTime.MaxValue;
+
+                    // Check if alert covers this day
+                    if (alert.Onset.HasValue)
+                    {
+                        if (day.StartTime.Date >= alert.Onset.Value.Date &&
+                            day.StartTime.Date <= effectiveEnd.Date)
+                        {
+                            int alertBonus = alert.Severity switch
+                            {
+                                AlertSeverity.Extreme => 60,   // Blizzard/Ice Storm Warning
+                                AlertSeverity.Warning => 40,   // Winter Storm Warning
+                                AlertSeverity.Watch => 25,     // Winter Storm Watch
+                                AlertSeverity.Advisory => 18,  // Winter Weather Advisory
+                                _ => 0
+                            };
+
+                            int delayBonus = (int)(alertBonus * 0.75); // Delays get 75% of closure bonus
+
+                            closureChance += alertBonus;
+                            delayChance += delayBonus;
+
+                            Console.WriteLine($"Alert boost applied to {day.Name}: {alert.Type} → +{alertBonus}% closure, +{delayBonus}% delay");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"Alert does not cover {day.Name} ({day.StartTime:MM/dd}) - Onset: {alert.Onset.Value:MM/dd}, End: {effectiveEnd:MM/dd}");
+                        }
+                    }
+                }
             }
 
             // ==========================================
@@ -683,13 +807,30 @@ namespace SnowDayPredictor.Services
 
             // Look for explicit amounts in text
             var textAmount = ParseSnowfallFromText(text);
-            if (textAmount != null && textAmount.Contains("\""))
+            if (textAmount != null)
             {
-                // Try to extract numeric value
-                var match = System.Text.RegularExpressions.Regex.Match(textAmount, @"(\d+\.?\d*)");
-                if (match.Success && double.TryParse(match.Value, out var inches))
+                // Check for range like "5-9"" or "5.0""
+                if (textAmount.Contains("-"))
                 {
-                    return inches;
+                    // Extract range and use midpoint
+                    var rangeMatch = System.Text.RegularExpressions.Regex.Match(textAmount, @"(\d+\.?\d*)-(\d+\.?\d*)");
+                    if (rangeMatch.Success)
+                    {
+                        var low = double.Parse(rangeMatch.Groups[1].Value);
+                        var high = double.Parse(rangeMatch.Groups[2].Value);
+                        var midpoint = (low + high) / 2.0;
+                        Console.WriteLine($"Snow range detected: {low}-{high}\", using midpoint: {midpoint:F1}\"");
+                        return midpoint;
+                    }
+                }
+                else if (textAmount.Contains("\""))
+                {
+                    // Single value
+                    var match = System.Text.RegularExpressions.Regex.Match(textAmount, @"(\d+\.?\d*)");
+                    if (match.Success && double.TryParse(match.Value, out var inches))
+                    {
+                        return inches;
+                    }
                 }
             }
 
@@ -1112,5 +1253,108 @@ namespace SnowDayPredictor.Services
 
             return new List<HistoricalWeatherDay>();
         }
+
+
+        public async Task<List<WeatherAlert>> GetActiveAlerts(double lat, double lon)
+        {
+            try
+            {
+                var url = $"https://api.weather.gov/alerts/active?point={lat:F4},{lon:F4}";
+                Console.WriteLine($"Fetching alerts: {url}");
+
+                var response = await _httpClient.GetAsync(url);
+                Console.WriteLine($"Alerts API status: {response.StatusCode}");
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine("No alerts API response");
+                    return new List<WeatherAlert>();
+                }
+
+                var alertsData = await response.Content.ReadFromJsonAsync<NWSAlertsResponse>();
+
+                if (alertsData?.Features == null || !alertsData.Features.Any())
+                {
+                    Console.WriteLine("No active alerts");
+                    return new List<WeatherAlert>();
+                }
+
+                var alerts = new List<WeatherAlert>();
+
+                foreach (var feature in alertsData.Features)
+                {
+                    var props = feature.Properties;
+                    var eventType = props.Event.ToLower();
+
+                    // Only process winter weather alerts
+                    if (!eventType.Contains("winter") && !eventType.Contains("snow") &&
+                        !eventType.Contains("ice") && !eventType.Contains("blizzard") &&
+                        !eventType.Contains("freeze") && !eventType.Contains("cold"))
+                    {
+                        continue;
+                    }
+
+                    var alert = new WeatherAlert
+                    {
+                        Type = props.Event,
+                        Headline = props.Headline,
+                        Description = props.Description,
+                        Onset = props.Onset,
+                        Expires = props.Expires,
+                        Ends = props.Ends,  
+                        Severity = DetermineAlertSeverity(props.Event)
+                    };
+
+                    alerts.Add(alert);
+                    Console.WriteLine($"Active alert: {alert.Type} (Severity: {alert.Severity})");
+                }
+
+                return alerts;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Alerts API error: {ex.Message}");
+                return new List<WeatherAlert>();
+            }
+        }
+
+        private AlertSeverity DetermineAlertSeverity(string eventType)
+        {
+            var lowerEvent = eventType.ToLower();
+
+            // Extreme alerts
+            if (lowerEvent.Contains("blizzard warning") ||
+                lowerEvent.Contains("ice storm warning"))
+            {
+                return AlertSeverity.Extreme;
+            }
+
+            // Warnings
+            if (lowerEvent.Contains("winter storm warning") ||
+                lowerEvent.Contains("snow squall warning") ||
+                lowerEvent.Contains("extreme cold warning"))
+            {
+                return AlertSeverity.Warning;
+            }
+
+            // Watches
+            if (lowerEvent.Contains("winter storm watch") ||
+                lowerEvent.Contains("blizzard watch"))
+            {
+                return AlertSeverity.Watch;
+            }
+
+            // Advisories
+            if (lowerEvent.Contains("winter weather advisory") ||
+                lowerEvent.Contains("wind chill advisory") ||
+                lowerEvent.Contains("freezing rain advisory") ||
+                lowerEvent.Contains("snow advisory"))
+            {
+                return AlertSeverity.Advisory;
+            }
+
+            return AlertSeverity.None;
+        }
+
     }
 }

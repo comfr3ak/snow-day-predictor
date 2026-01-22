@@ -27,6 +27,25 @@ jobs:
           $content = $content -replace '<base href="/" />', '<base href="/snow-day-predictor/" />'
           Set-Content $file -Value $content -NoNewline
         shell: pwsh
+
+      - name: Add cache busting
+        run: |
+          $version = Get-Date -Format "yyyyMMddHHmmss"
+          $indexPath = "release/wwwroot/index.html"
+          $content = Get-Content $indexPath -Raw
+          $content = $content -replace '(<script src="_framework/blazor.webassembly.js)"', "`$1?v=$version`""
+          $content | Set-Content $indexPath -NoNewline
+        shell: pwsh
+
+      - name: Generate version file
+        run: |
+          $version = Get-Date -Format "yyyy.MM.dd.HHmm"
+          $versionJson = @{
+            version = $version
+            buildDate = (Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC")
+          } | ConvertTo-Json
+          $versionJson | Set-Content "release/wwwroot/version.json"
+        shell: pwsh
         
       - name: Add .nojekyll
         run: touch release/wwwroot/.nojekyll

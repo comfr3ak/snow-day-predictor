@@ -133,22 +133,31 @@
         public double Latitude { get; set; }
 
         // Snow tolerance based on state/region
+        // Snow tolerance based on region
         public int SnowToleranceMultiplier => State.ToUpper() switch
         {
-            // Southern states - very low tolerance
+            // Deep South - very low tolerance
             "FL" or "GA" or "SC" or "AL" or "MS" or "LA" or "TX" or "AR" => 200,
 
-            // Mid-South - low tolerance
-            "NC" or "TN" or "KY" or "VA" or "WV" or "OK" => 150,
+            // Mid-South + DC Metro - low tolerance, extended recovery
+            "NC" or "TN" or "KY" or "VA" or "MD" or "WV" or "OK" => 150,
 
             // Mid-Atlantic/Lower Midwest - moderate tolerance
-            "MD" or "DE" or "NJ" or "PA" or "OH" or "IN" or "MO" or "KS" => 100,
+            "DE" or "PA" or "MO" or "KS" => 100,
 
-            // Northeast/Upper Midwest - high tolerance
-            "NY" or "CT" or "MA" or "RI" or "VT" or "NH" or "ME" or "MI" or "WI" or "IL" or "IA" or "MN" => 75,
+            // Southern portions of these states
+            "OH" or "IN" => 100,
 
-            // Mountain/Northern states - very high tolerance
+            // Northeast Corridor - high tolerance
+            "NJ" or "NY" or "CT" or "MA" or "RI" => 75,
+
+            // Northern/Mountain states - very high tolerance
+            "VT" or "NH" or "ME" or "MI" or "WI" or "IL" or "IA" or "MN" => 50,
             "MT" or "WY" or "CO" or "ID" or "ND" or "SD" or "AK" or "UT" => 50,
+
+            // West Coast (rare snow, but cities struggle)
+            "WA" or "OR" or "CA" => 150,
+            "NV" or "AZ" or "NM" => 175,
 
             _ => 100 // Default
         };
@@ -195,5 +204,64 @@
             [System.Text.Json.Serialization.JsonPropertyName("precipitation_sum")]
             public List<double> PrecipitationSum { get; set; } = new();
         }
+    }
+
+    // NWS Weather Alerts
+    public class NWSAlertsResponse
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("features")]
+        public List<AlertFeature> Features { get; set; } = new();
+    }
+
+    public class AlertFeature
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("properties")]
+        public AlertProperties Properties { get; set; } = new();
+    }
+
+    public class AlertProperties
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("event")]
+        public string Event { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("headline")]
+        public string Headline { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("description")]
+        public string Description { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("severity")]
+        public string Severity { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("urgency")]
+        public string Urgency { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("onset")]
+        public DateTime? Onset { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("expires")]
+        public DateTime? Expires { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("ends")] 
+        public DateTime? Ends { get; set; }
+    }
+
+    public class WeatherAlert
+    {
+        public string Type { get; set; } = "";
+        public string Headline { get; set; } = "";
+        public string Description { get; set; } = "";
+        public AlertSeverity Severity { get; set; }
+        public DateTime? Onset { get; set; }
+        public DateTime? Expires { get; set; }
+        public DateTime? Ends { get; set; }
+    }
+
+    public enum AlertSeverity
+    {
+        None = 0,
+        Advisory = 1,      // Winter Weather Advisory: +15-25%
+        Watch = 2,         // Winter Storm Watch: +20-30%
+        Warning = 3,       // Winter Storm Warning: +30-50%
+        Extreme = 4        // Blizzard/Ice Storm Warning: +50-70%
     }
 }
