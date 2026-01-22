@@ -1,9 +1,7 @@
 ﻿name: Deploy to GitHub Pages
-
 on:
   push:
     branches: [ master ]
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -27,7 +25,7 @@ jobs:
           $content = $content -replace '<base href="/" />', '<base href="/snow-day-predictor/" />'
           Set-Content $file -Value $content -NoNewline
         shell: pwsh
-
+        
       - name: Add cache busting
         run: |
           $version = Get-Date -Format "yyyyMMddHHmmss"
@@ -36,7 +34,7 @@ jobs:
           $content = $content -replace '(<script src="_framework/blazor.webassembly.js)"', "`$1?v=$version`""
           $content | Set-Content $indexPath -NoNewline
         shell: pwsh
-
+        
       - name: Generate version file
         run: |
           $version = Get-Date -Format "yyyy.MM.dd.HHmm"
