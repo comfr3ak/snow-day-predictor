@@ -15,14 +15,14 @@ namespace SnowDayPredictor.Services
         public WeatherService(HttpClient httpClient)
         {
             _httpClient = httpClient;
-            _httpClient.DefaultRequestHeaders.Add("User-Agent", "SnowDayPredictor/1.0");
+            //_httpClient.DefaultRequestHeaders.Add("User-Agent", "SnowDayPredictor/1.0");
             _jsRuntime = null;
         }
 
         public WeatherService(HttpClient httpClient, IJSRuntime jsRuntime)
         {
             _httpClient = httpClient;
-            _httpClient.DefaultRequestHeaders.Add("User-Agent", "SnowDayPredictor/1.0");
+           // _httpClient.DefaultRequestHeaders.Add("User-Agent", "SnowDayPredictor/1.0");
             _jsRuntime = jsRuntime;
         }
 
