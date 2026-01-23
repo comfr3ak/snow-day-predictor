@@ -14,7 +14,7 @@ builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.
 builder.Services.AddScoped<SnowDayPredictor.Services.WeatherService>(sp =>
 {
     var httpClient = new HttpClient();
-    httpClient.DefaultRequestHeaders.Add("User-Agent", "SnowDayPredictor/1.0");
+   // httpClient.DefaultRequestHeaders.Add("User-Agent", "SnowDayPredictor/1.0");
     var jsRuntime = sp.GetRequiredService<IJSRuntime>();  // ADD THIS LINE
     return new SnowDayPredictor.Services.WeatherService(httpClient, jsRuntime);  // ADD jsRuntime parameter
 });
