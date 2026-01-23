@@ -846,37 +846,33 @@ namespace SnowDayPredictor.Services
         /// <summary>
         /// Get city name from ZIP code (for saving locations) with multiple fallbacks
         /// </summary>
-        public async Task<(string cityName, string state)> GetCityNameFromZip(string zipCode)
+        /// 
+        public record ZipLookupResponse(string zip, string city, string state);
+        public async Task<(string city, string state)> GetCityNameFromZip(string zipCode)
         {
-            zipCode = (zipCode ?? "").Trim();
-            if (zipCode.Length != 5 || !zipCode.All(char.IsDigit))
-                return ($"ZIP {zipCode}", "");
-
-            // Your worker endpoint (same origin is even better if you host it under your site domain)
-            var proxyUrl = $"https://city-by-zip.ncs-cee.workers.dev/?zip={zipCode}";
-
             try
             {
-                using var resp = await _httpClient.GetAsync(proxyUrl);
-                if (!resp.IsSuccessStatusCode)
-                    return ($"ZIP {zipCode}", "");
+                var url = $"https://city-by-zip.ncs-cee.workers.dev/?zip={zipCode}";
 
-                var content = await resp.Content.ReadAsStringAsync();
-                using var doc = System.Text.Json.JsonDocument.Parse(content);
+                var result = await _httpClient.GetFromJsonAsync<ZipLookupResponse>(url);
 
-                var root = doc.RootElement;
-                var city = root.TryGetProperty("city", out var c) ? c.GetString() : null;
-                var state = root.TryGetProperty("state", out var s) ? s.GetString() : null;
-
-                if (!string.IsNullOrWhiteSpace(city) && !string.IsNullOrWhiteSpace(state))
-                    return (city, state);
-
-                return ($"ZIP {zipCode}", state ?? "");
+                if (!string.IsNullOrWhiteSpace(result?.city) &&
+                    !string.IsNullOrWhiteSpace(result?.state))
+                {
+                    return (result.city, result.state);
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                return ($"ZIP {zipCode}", "");
+                Console.WriteLine($"✗ ZIP proxy error: {ex.Message}");
             }
+
+            // Fallbacks as before...
+            var stateFromZip = GetStateFromZipPrefix(zipCode);
+            if (!string.IsNullOrEmpty(stateFromZip))
+                return ($"ZIP {zipCode}", stateFromZip);
+
+            return ($"ZIP {zipCode}", "");
         }
 
         private string GetStateFromZipPrefix(string zipCode)
