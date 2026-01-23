@@ -848,110 +848,35 @@ namespace SnowDayPredictor.Services
         /// </summary>
         public async Task<(string cityName, string state)> GetCityNameFromZip(string zipCode)
         {
-            // Try 1: Census.gov (most reliable, government source)
+            zipCode = (zipCode ?? "").Trim();
+            if (zipCode.Length != 5 || !zipCode.All(char.IsDigit))
+                return ($"ZIP {zipCode}", "");
+
+            // Your worker endpoint (same origin is even better if you host it under your site domain)
+            var proxyUrl = $"https://city-by-zip.ncs-cee.workers.dev/?zip={zipCode}";
+
             try
             {
-                Console.WriteLine("Trying Census.gov geocoder...");
+                using var resp = await _httpClient.GetAsync(proxyUrl);
+                if (!resp.IsSuccessStatusCode)
+                    return ($"ZIP {zipCode}", "");
 
-                var censusUrl = $"https://geocoding.geo.census.gov/geocoder/locations/address?zip={zipCode}&benchmark=2020&format=json";
+                var content = await resp.Content.ReadAsStringAsync();
+                using var doc = System.Text.Json.JsonDocument.Parse(content);
 
-                var censusResponse = await _httpClient.GetAsync(censusUrl);
-                Console.WriteLine($"Census status: {censusResponse.StatusCode}");
+                var root = doc.RootElement;
+                var city = root.TryGetProperty("city", out var c) ? c.GetString() : null;
+                var state = root.TryGetProperty("state", out var s) ? s.GetString() : null;
 
-                if (censusResponse.IsSuccessStatusCode)
-                {
-                    var content = await censusResponse.Content.ReadAsStringAsync();
-                    Console.WriteLine($"Census response: {content.Substring(0, Math.Min(300, content.Length))}");
+                if (!string.IsNullOrWhiteSpace(city) && !string.IsNullOrWhiteSpace(state))
+                    return (city, state);
 
-                    using var doc = System.Text.Json.JsonDocument.Parse(content);
-                    var root = doc.RootElement;
-
-                    if (root.TryGetProperty("result", out var result))
-                    {
-                        if (result.TryGetProperty("addressMatches", out var matches) && matches.GetArrayLength() > 0)
-                        {
-                            var match = matches[0];
-                            if (match.TryGetProperty("addressComponents", out var components))
-                            {
-                                string? city = null;
-                                string? state = null;
-
-                                if (components.TryGetProperty("city", out var cityProp))
-                                    city = cityProp.GetString();
-
-                                if (components.TryGetProperty("state", out var stateProp))
-                                    state = stateProp.GetString();
-
-                                if (!string.IsNullOrEmpty(city) && !string.IsNullOrEmpty(state))
-                                {
-                                    Console.WriteLine($"✓ Census success: {city}, {state}");
-                                    return (city, state);
-                                }
-                            }
-                        }
-                    }
-                }
+                return ($"ZIP {zipCode}", state ?? "");
             }
-            catch (Exception ex)
+            catch
             {
-                Console.WriteLine($"✗ Census error: {ex.Message}");
+                return ($"ZIP {zipCode}", "");
             }
-
-            // Try 2: Zippopotam.us (backup)
-            try
-            {
-                Console.WriteLine("Trying Zippopotam.us...");
-
-                var url = $"https://api.zippopotam.us/us/{zipCode}";
-
-                var response = await _httpClient.GetAsync(url);
-                Console.WriteLine($"Zippopotam status: {response.StatusCode}");
-
-                if (response.IsSuccessStatusCode)
-                {
-                    var content = await response.Content.ReadAsStringAsync();
-                    Console.WriteLine($"Zippopotam response: {content.Substring(0, Math.Min(300, content.Length))}");
-
-                    using var doc = System.Text.Json.JsonDocument.Parse(content);
-                    var root = doc.RootElement;
-
-                    if (root.TryGetProperty("places", out var places) && places.GetArrayLength() > 0)
-                    {
-                        var place = places[0];
-
-                        string? city = null;
-                        string? stateAbbr = null;
-
-                        if (place.TryGetProperty("place name", out var placeNameElement))
-                            city = placeNameElement.GetString();
-
-                        if (place.TryGetProperty("state abbreviation", out var stateAbbrElement))
-                            stateAbbr = stateAbbrElement.GetString();
-
-                        if (!string.IsNullOrEmpty(city) && !string.IsNullOrEmpty(stateAbbr))
-                        {
-                            Console.WriteLine($"✓ Zippopotam success: {city}, {stateAbbr}");
-                            return (city, stateAbbr);
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"✗ Zippopotam error: {ex.Message}");
-            }
-
-            // Fallback: Use ZIP prefix to at least get the state
-            var stateFromZip = GetStateFromZipPrefix(zipCode);
-            if (!string.IsNullOrEmpty(stateFromZip))
-            {
-                Console.WriteLine($"✓ Using ZIP prefix fallback: {zipCode} → {stateFromZip}");
-                return ($"ZIP {zipCode}", stateFromZip);
-            }
-
-            // Complete failure - return ZIP with no state
-            Console.WriteLine($"✗ All lookups failed for ZIP: {zipCode}");
-            return ($"ZIP {zipCode}", "");
         }
 
         private string GetStateFromZipPrefix(string zipCode)
