@@ -127,58 +127,134 @@ namespace SnowDayPredictor.Services
         }
 
         /// <summary>
-        /// Get coordinates from ZIP code using geocoding API with fallback
+        /// Get coordinates and city name from ZIP code using OpenStreetMap Nominatim geocoding
         /// </summary>
-        public async Task<(double lat, double lon)?> GetCoordinatesFromZip(string zipCode)
+        public async Task<(double lat, double lon, string city, string state)?> GetCoordinatesAndCityFromZip(string zipCode)
         {
-            // Try Zippopotam.us first
             try
             {
-                var url = $"https://api.zippopotam.us/us/{zipCode}";
-                Console.WriteLine($"Trying Zippopotam: {url}");
-                var response = await _httpClient.GetFromJsonAsync<JsonElement>(url);
+                Console.WriteLine($"Geocoding ZIP: {zipCode}");
+                // Add addressdetails=1 to get structured address components
+                var url = $"https://nominatim.openstreetmap.org/search?postalcode={zipCode}&country=US&format=json&addressdetails=1&limit=1";
 
-                if (response.TryGetProperty("places", out var places) && places.GetArrayLength() > 0)
+                // Nominatim requires a User-Agent header
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.Add("User-Agent", "SnowDayPredictor/1.0");
+
+                var response = await _httpClient.SendAsync(request);
+                Console.WriteLine($"Geocoding response status: {response.StatusCode}");
+
+                if (!response.IsSuccessStatusCode)
                 {
-                    var place = places[0];
-                    var lat = double.Parse(place.GetProperty("latitude").GetString() ?? "0");
-                    var lon = double.Parse(place.GetProperty("longitude").GetString() ?? "0");
-                    Console.WriteLine($"Zippopotam success: {lat}, {lon}");
-                    return (lat, lon);
+                    Console.WriteLine("Geocoding failed");
+                    return null;
                 }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Zippopotam failed: {ex.Message}");
-            }
 
-            // Fallback to Census Geocoding API
-            try
-            {
-                var url = $"https://geocoding.geo.census.gov/geocoder/locations/address?street=&city=&state=&zip={zipCode}&benchmark=Public_AR_Current&format=json";
-                Console.WriteLine($"Trying Census API: {url}");
-                var response = await _httpClient.GetFromJsonAsync<JsonElement>(url);
+                var content = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"Geocoding response: {content}");
 
-                if (response.TryGetProperty("result", out var result) &&
-                    result.TryGetProperty("addressMatches", out var matches) &&
-                    matches.GetArrayLength() > 0)
+                var data = await response.Content.ReadFromJsonAsync<List<Dictionary<string, JsonElement>>>();
+                if (data != null && data.Count > 0)
                 {
-                    var match = matches[0];
-                    if (match.TryGetProperty("coordinates", out var coords))
+                    var result = data[0];
+                    var lat = result["lat"].GetString();
+                    var lon = result["lon"].GetString();
+
+                    string city = "";
+                    string state = "";
+
+                    // Try to get structured address data
+                    if (result.ContainsKey("address"))
                     {
-                        var lon = coords.GetProperty("x").GetDouble();
-                        var lat = coords.GetProperty("y").GetDouble();
-                        Console.WriteLine($"Census API success: {lat}, {lon}");
-                        return (lat, lon);
+                        var address = result["address"];
+
+                        // Try multiple city fields in order of preference
+                        if (address.ValueKind == JsonValueKind.Object)
+                        {
+                            var addressObj = address;
+
+                            // Try city, town, village, hamlet in order
+                            if (addressObj.TryGetProperty("city", out var cityProp))
+                                city = cityProp.GetString() ?? "";
+                            else if (addressObj.TryGetProperty("town", out var townProp))
+                                city = townProp.GetString() ?? "";
+                            else if (addressObj.TryGetProperty("village", out var villageProp))
+                                city = villageProp.GetString() ?? "";
+                            else if (addressObj.TryGetProperty("hamlet", out var hamletProp))
+                                city = hamletProp.GetString() ?? "";
+
+                            // Get state
+                            if (addressObj.TryGetProperty("state", out var stateProp))
+                            {
+                                var stateName = stateProp.GetString() ?? "";
+                                // Convert full state name to abbreviation if needed
+                                state = ConvertStateToAbbreviation(stateName);
+                            }
+                        }
                     }
+
+                    // Fallback: parse display_name if address parsing failed
+                    if (string.IsNullOrEmpty(city) && result.ContainsKey("display_name"))
+                    {
+                        var displayName = result["display_name"].GetString() ?? "";
+                        var parts = displayName.Split(',').Select(p => p.Trim()).ToArray();
+                        if (parts.Length > 0)
+                            city = parts[0];
+                    }
+
+                    // Final fallback
+                    if (string.IsNullOrEmpty(city))
+                        city = "Unknown City";
+
+                    Console.WriteLine($"Location found: {city}, {state} at {lat}, {lon}");
+                    return (double.Parse(lat!), double.Parse(lon!), city, state);
                 }
+
+                Console.WriteLine("No geocoding results found");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Census API failed: {ex.Message}");
+                Console.WriteLine($"Geocoding error: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
             }
 
             return null;
+        }
+
+        private string ConvertStateToAbbreviation(string stateName)
+        {
+            // If already an abbreviation, return as-is
+            if (stateName.Length == 2 && stateName.All(char.IsUpper))
+                return stateName;
+
+            // Common state name to abbreviation mapping
+            var stateMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                {"Alabama", "AL"}, {"Alaska", "AK"}, {"Arizona", "AZ"}, {"Arkansas", "AR"},
+                {"California", "CA"}, {"Colorado", "CO"}, {"Connecticut", "CT"}, {"Delaware", "DE"},
+                {"Florida", "FL"}, {"Georgia", "GA"}, {"Hawaii", "HI"}, {"Idaho", "ID"},
+                {"Illinois", "IL"}, {"Indiana", "IN"}, {"Iowa", "IA"}, {"Kansas", "KS"},
+                {"Kentucky", "KY"}, {"Louisiana", "LA"}, {"Maine", "ME"}, {"Maryland", "MD"},
+                {"Massachusetts", "MA"}, {"Michigan", "MI"}, {"Minnesota", "MN"}, {"Mississippi", "MS"},
+                {"Missouri", "MO"}, {"Montana", "MT"}, {"Nebraska", "NE"}, {"Nevada", "NV"},
+                {"New Hampshire", "NH"}, {"New Jersey", "NJ"}, {"New Mexico", "NM"}, {"New York", "NY"},
+                {"North Carolina", "NC"}, {"North Dakota", "ND"}, {"Ohio", "OH"}, {"Oklahoma", "OK"},
+                {"Oregon", "OR"}, {"Pennsylvania", "PA"}, {"Rhode Island", "RI"}, {"South Carolina", "SC"},
+                {"South Dakota", "SD"}, {"Tennessee", "TN"}, {"Texas", "TX"}, {"Utah", "UT"},
+                {"Vermont", "VT"}, {"Virginia", "VA"}, {"Washington", "WA"}, {"West Virginia", "WV"},
+                {"Wisconsin", "WI"}, {"Wyoming", "WY"}
+            };
+
+            return stateMap.TryGetValue(stateName, out var abbr) ? abbr : stateName;
+        }
+
+        /// <summary>
+        /// Get coordinates from ZIP code (legacy method for compatibility)
+        /// </summary>
+        public async Task<(double lat, double lon)?> GetCoordinatesFromZip(string zipCode)
+        {
+            var result = await GetCoordinatesAndCityFromZip(zipCode);
+            return result.HasValue ? (result.Value.lat, result.Value.lon) : null;
         }
 
         /// <summary>
@@ -768,58 +844,168 @@ namespace SnowDayPredictor.Services
         }
 
         /// <summary>
-        /// Get city name from ZIP code (for saving locations) with fallback
+        /// Get city name from ZIP code (for saving locations) with multiple fallbacks
         /// </summary>
         public async Task<(string cityName, string state)> GetCityNameFromZip(string zipCode)
         {
-            // Try Zippopotam.us first
+            // Try 1: Census.gov (most reliable, government source)
             try
             {
-                var url = $"https://api.zippopotam.us/us/{zipCode}";
-                Console.WriteLine($"GetCityName: Trying Zippopotam for {zipCode}");
-                var response = await _httpClient.GetFromJsonAsync<JsonElement>(url);
+                Console.WriteLine("Trying Census.gov geocoder...");
 
-                if (response.TryGetProperty("places", out var places) && places.GetArrayLength() > 0)
+                var censusUrl = $"https://geocoding.geo.census.gov/geocoder/locations/address?zip={zipCode}&benchmark=2020&format=json";
+
+                var censusResponse = await _httpClient.GetAsync(censusUrl);
+                Console.WriteLine($"Census status: {censusResponse.StatusCode}");
+
+                if (censusResponse.IsSuccessStatusCode)
                 {
-                    var place = places[0];
-                    var city = place.GetProperty("place name").GetString() ?? "";
-                    var state = place.GetProperty("state abbreviation").GetString() ?? "";
-                    Console.WriteLine($"GetCityName: Zippopotam success - {city}, {state}");
-                    return (city, state);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"GetCityName: Zippopotam failed - {ex.Message}");
-            }
+                    var content = await censusResponse.Content.ReadAsStringAsync();
+                    Console.WriteLine($"Census response: {content.Substring(0, Math.Min(300, content.Length))}");
 
-            // Fallback to Census Geocoding API
-            try
-            {
-                var url = $"https://geocoding.geo.census.gov/geocoder/locations/address?street=&city=&state=&zip={zipCode}&benchmark=Public_AR_Current&format=json";
-                Console.WriteLine($"GetCityName: Trying Census API for {zipCode}");
-                var response = await _httpClient.GetFromJsonAsync<JsonElement>(url);
+                    using var doc = System.Text.Json.JsonDocument.Parse(content);
+                    var root = doc.RootElement;
 
-                if (response.TryGetProperty("result", out var result) &&
-                    result.TryGetProperty("addressMatches", out var matches) &&
-                    matches.GetArrayLength() > 0)
-                {
-                    var match = matches[0];
-                    if (match.TryGetProperty("addressComponents", out var components))
+                    if (root.TryGetProperty("result", out var result))
                     {
-                        var city = components.TryGetProperty("city", out var cityProp) ? cityProp.GetString() ?? "" : "";
-                        var state = components.TryGetProperty("state", out var stateProp) ? stateProp.GetString() ?? "" : "";
-                        Console.WriteLine($"GetCityName: Census API success - {city}, {state}");
-                        return (city, state);
+                        if (result.TryGetProperty("addressMatches", out var matches) && matches.GetArrayLength() > 0)
+                        {
+                            var match = matches[0];
+                            if (match.TryGetProperty("addressComponents", out var components))
+                            {
+                                string? city = null;
+                                string? state = null;
+
+                                if (components.TryGetProperty("city", out var cityProp))
+                                    city = cityProp.GetString();
+
+                                if (components.TryGetProperty("state", out var stateProp))
+                                    state = stateProp.GetString();
+
+                                if (!string.IsNullOrEmpty(city) && !string.IsNullOrEmpty(state))
+                                {
+                                    Console.WriteLine($"✓ Census success: {city}, {state}");
+                                    return (city, state);
+                                }
+                            }
+                        }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"GetCityName: Census API failed - {ex.Message}");
+                Console.WriteLine($"✗ Census error: {ex.Message}");
             }
 
-            return ("Unknown City", "");
+            // Try 2: Zippopotam.us (backup)
+            try
+            {
+                Console.WriteLine("Trying Zippopotam.us...");
+
+                var url = $"https://api.zippopotam.us/us/{zipCode}";
+
+                var response = await _httpClient.GetAsync(url);
+                Console.WriteLine($"Zippopotam status: {response.StatusCode}");
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine($"Zippopotam response: {content.Substring(0, Math.Min(300, content.Length))}");
+
+                    using var doc = System.Text.Json.JsonDocument.Parse(content);
+                    var root = doc.RootElement;
+
+                    if (root.TryGetProperty("places", out var places) && places.GetArrayLength() > 0)
+                    {
+                        var place = places[0];
+
+                        string? city = null;
+                        string? stateAbbr = null;
+
+                        if (place.TryGetProperty("place name", out var placeNameElement))
+                            city = placeNameElement.GetString();
+
+                        if (place.TryGetProperty("state abbreviation", out var stateAbbrElement))
+                            stateAbbr = stateAbbrElement.GetString();
+
+                        if (!string.IsNullOrEmpty(city) && !string.IsNullOrEmpty(stateAbbr))
+                        {
+                            Console.WriteLine($"✓ Zippopotam success: {city}, {stateAbbr}");
+                            return (city, stateAbbr);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"✗ Zippopotam error: {ex.Message}");
+            }
+
+            // Fallback: Use ZIP prefix to at least get the state
+            var stateFromZip = GetStateFromZipPrefix(zipCode);
+            if (!string.IsNullOrEmpty(stateFromZip))
+            {
+                Console.WriteLine($"✓ Using ZIP prefix fallback: {zipCode} → {stateFromZip}");
+                return ($"ZIP {zipCode}", stateFromZip);
+            }
+
+            // Complete failure - return ZIP with no state
+            Console.WriteLine($"✗ All lookups failed for ZIP: {zipCode}");
+            return ($"ZIP {zipCode}", "");
+        }
+
+        private string GetStateFromZipPrefix(string zipCode)
+        {
+            if (zipCode.Length < 3) return "";
+
+            var prefix = int.TryParse(zipCode.Substring(0, 3), out var p) ? p : -1;
+
+            if (prefix >= 100 && prefix <= 149) return "NY";
+            if (prefix >= 150 && prefix <= 196) return "PA";
+            if (prefix >= 197 && prefix <= 199) return "DE";
+            if (prefix >= 200 && prefix <= 205) return "DC";
+            if (prefix >= 206 && prefix <= 219) return "MD";
+            if (prefix >= 220 && prefix <= 246) return "VA";
+            if (prefix >= 247 && prefix <= 268) return "WV";
+            if (prefix >= 270 && prefix <= 289) return "NC";
+            if (prefix >= 290 && prefix <= 299) return "SC";
+            if (prefix >= 300 && prefix <= 319) return "GA";
+            if (prefix >= 320 && prefix <= 349) return "FL";
+            if (prefix >= 350 && prefix <= 369) return "AL";
+            if (prefix >= 370 && prefix <= 385) return "TN";
+            if (prefix >= 386 && prefix <= 397) return "MS";
+            if (prefix >= 398 && prefix <= 399) return "GA";
+            if (prefix >= 400 && prefix <= 427) return "KY";
+            if (prefix >= 430 && prefix <= 458) return "OH";
+            if (prefix >= 460 && prefix <= 479) return "IN";
+            if (prefix >= 480 && prefix <= 499) return "MI";
+            if (prefix >= 500 && prefix <= 528) return "IA";
+            if (prefix >= 530 && prefix <= 549) return "WI";
+            if (prefix >= 550 && prefix <= 567) return "MN";
+            if (prefix >= 570 && prefix <= 577) return "SD";
+            if (prefix >= 580 && prefix <= 588) return "ND";
+            if (prefix >= 590 && prefix <= 599) return "MT";
+            if (prefix >= 600 && prefix <= 620) return "IL";
+            if (prefix >= 622 && prefix <= 629) return "IL";
+            if (prefix >= 630 && prefix <= 658) return "MO";
+            if (prefix >= 660 && prefix <= 679) return "KS";
+            if (prefix >= 680 && prefix <= 693) return "NE";
+            if (prefix >= 700 && prefix <= 729) return "LA";
+            if (prefix >= 730 && prefix <= 749) return "AR";
+            if (prefix >= 750 && prefix <= 799) return "TX";
+            if (prefix >= 800 && prefix <= 816) return "CO";
+            if (prefix >= 820 && prefix <= 831) return "WY";
+            if (prefix >= 832 && prefix <= 838) return "ID";
+            if (prefix >= 840 && prefix <= 847) return "UT";
+            if (prefix >= 850 && prefix <= 865) return "AZ";
+            if (prefix >= 870 && prefix <= 884) return "NM";
+            if (prefix >= 889 && prefix <= 898) return "NV";
+            if (prefix >= 900 && prefix <= 961) return "CA";
+            if (prefix >= 970 && prefix <= 979) return "OR";
+            if (prefix >= 980 && prefix <= 994) return "WA";
+            if (prefix >= 995 && prefix <= 999) return "AK";
+
+            return "";
         }
 
         /// <summary>

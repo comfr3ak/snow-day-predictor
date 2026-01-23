@@ -389,20 +389,22 @@
 
         try
         {
-            // Step 1: Convert ZIP to coordinates AND get city name from ZIP
+            // Step 1: Convert ZIP to coordinates
             loadingStatus = "Getting location data...";
             StateHasChanged();
 
             var coords = await WeatherService.GetCoordinatesFromZip(zipCode);
-            if (coords == null)
+            if (!coords.HasValue)
             {
-                errorMessage = "Could not find location for that ZIP code. Please try another.";
+                errorMessage = $"Could not find location for ZIP code {zipCode}. Please try another ZIP code or use 'Use My Location' instead.";
+                Console.WriteLine($"ERROR: GetCoordinatesFromZip returned null for ZIP {zipCode}");
                 return;
             }
 
-            // Get the actual city name for this ZIP code (not the NWS location)
-            var (zipCityName, zipState) = await WeatherService.GetCityNameFromZip(zipCode);
-            currentCityName = string.IsNullOrEmpty(zipState) ? zipCityName : $"{zipCityName}, {zipState}";
+            // Get city name from ZIP (separate call with fallbacks)
+            var (cityName, stateName) = await WeatherService.GetCityNameFromZip(zipCode);
+            currentCityName = cityName;
+            Console.WriteLine($"City name from ZIP: {currentCityName}");
 
             // Step 2: Get weather forecast
             loadingStatus = "Getting weather forecast...";
@@ -421,7 +423,7 @@
 
             var geography = new GeographyContext
             {
-                State = zipState, // Use ZIP state, not NWS state
+                State = stateName, // Use state from ZIP lookup
                 Latitude = coords.Value.lat,
                 Longitude = coords.Value.lon
             };
