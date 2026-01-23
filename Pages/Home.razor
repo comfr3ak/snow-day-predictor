@@ -403,7 +403,7 @@
 
             // Get city name from ZIP (separate call with fallbacks)
             var (cityName, stateName) = await WeatherService.GetCityNameFromZip(zipCode);
-            currentCityName = cityName;
+            currentCityName = string.IsNullOrEmpty(stateName) ? cityName : $"{cityName}, {stateName}";
             Console.WriteLine($"City name from ZIP: {currentCityName}");
 
             // Step 2: Get weather forecast
