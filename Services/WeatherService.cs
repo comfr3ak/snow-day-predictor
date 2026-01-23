@@ -127,13 +127,15 @@ namespace SnowDayPredictor.Services
         }
 
         /// <summary>
-        /// Get coordinates from ZIP code using geocoding API
+        /// Get coordinates from ZIP code using geocoding API with fallback
         /// </summary>
         public async Task<(double lat, double lon)?> GetCoordinatesFromZip(string zipCode)
         {
+            // Try Zippopotam.us first
             try
             {
                 var url = $"https://api.zippopotam.us/us/{zipCode}";
+                Console.WriteLine($"Trying Zippopotam: {url}");
                 var response = await _httpClient.GetFromJsonAsync<JsonElement>(url);
 
                 if (response.TryGetProperty("places", out var places) && places.GetArrayLength() > 0)
@@ -141,10 +143,40 @@ namespace SnowDayPredictor.Services
                     var place = places[0];
                     var lat = double.Parse(place.GetProperty("latitude").GetString() ?? "0");
                     var lon = double.Parse(place.GetProperty("longitude").GetString() ?? "0");
+                    Console.WriteLine($"Zippopotam success: {lat}, {lon}");
                     return (lat, lon);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Zippopotam failed: {ex.Message}");
+            }
+
+            // Fallback to Census Geocoding API
+            try
+            {
+                var url = $"https://geocoding.geo.census.gov/geocoder/locations/address?street=&city=&state=&zip={zipCode}&benchmark=Public_AR_Current&format=json";
+                Console.WriteLine($"Trying Census API: {url}");
+                var response = await _httpClient.GetFromJsonAsync<JsonElement>(url);
+
+                if (response.TryGetProperty("result", out var result) &&
+                    result.TryGetProperty("addressMatches", out var matches) &&
+                    matches.GetArrayLength() > 0)
+                {
+                    var match = matches[0];
+                    if (match.TryGetProperty("coordinates", out var coords))
+                    {
+                        var lon = coords.GetProperty("x").GetDouble();
+                        var lat = coords.GetProperty("y").GetDouble();
+                        Console.WriteLine($"Census API success: {lat}, {lon}");
+                        return (lat, lon);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Census API failed: {ex.Message}");
+            }
 
             return null;
         }
@@ -736,13 +768,15 @@ namespace SnowDayPredictor.Services
         }
 
         /// <summary>
-        /// Get city name from ZIP code (for saving locations)
+        /// Get city name from ZIP code (for saving locations) with fallback
         /// </summary>
         public async Task<(string cityName, string state)> GetCityNameFromZip(string zipCode)
         {
+            // Try Zippopotam.us first
             try
             {
                 var url = $"https://api.zippopotam.us/us/{zipCode}";
+                Console.WriteLine($"GetCityName: Trying Zippopotam for {zipCode}");
                 var response = await _httpClient.GetFromJsonAsync<JsonElement>(url);
 
                 if (response.TryGetProperty("places", out var places) && places.GetArrayLength() > 0)
@@ -750,10 +784,40 @@ namespace SnowDayPredictor.Services
                     var place = places[0];
                     var city = place.GetProperty("place name").GetString() ?? "";
                     var state = place.GetProperty("state abbreviation").GetString() ?? "";
+                    Console.WriteLine($"GetCityName: Zippopotam success - {city}, {state}");
                     return (city, state);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"GetCityName: Zippopotam failed - {ex.Message}");
+            }
+
+            // Fallback to Census Geocoding API
+            try
+            {
+                var url = $"https://geocoding.geo.census.gov/geocoder/locations/address?street=&city=&state=&zip={zipCode}&benchmark=Public_AR_Current&format=json";
+                Console.WriteLine($"GetCityName: Trying Census API for {zipCode}");
+                var response = await _httpClient.GetFromJsonAsync<JsonElement>(url);
+
+                if (response.TryGetProperty("result", out var result) &&
+                    result.TryGetProperty("addressMatches", out var matches) &&
+                    matches.GetArrayLength() > 0)
+                {
+                    var match = matches[0];
+                    if (match.TryGetProperty("addressComponents", out var components))
+                    {
+                        var city = components.TryGetProperty("city", out var cityProp) ? cityProp.GetString() ?? "" : "";
+                        var state = components.TryGetProperty("state", out var stateProp) ? stateProp.GetString() ?? "" : "";
+                        Console.WriteLine($"GetCityName: Census API success - {city}, {state}");
+                        return (city, state);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"GetCityName: Census API failed - {ex.Message}");
+            }
 
             return ("Unknown City", "");
         }
