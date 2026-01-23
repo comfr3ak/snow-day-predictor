@@ -14,47 +14,62 @@
 
         <p>Enter your ZIP code to see the chance of snow days in your area over the next week.</p>
 
-        <SavedLocations locations="@savedLocations"
-                        OnLocationSelected="@LoadSavedLocation"
-                        OnLocationDeleted="@DeleteSavedLocation" />
+        <div class="input-container">
+            <SavedLocations locations="@savedLocations"
+                            CurrentZipCode="@zipCode"
+                            OnLocationSelected="@LoadSavedLocation"
+                            OnLocationDeleted="@DeleteSavedLocation" />
 
-        <div class="input-section mb-4">
-            <div class="zip-input-group">
-                <button class="btn btn-outline-secondary btn-sm location-btn"
-                        @onclick="UseMyLocation"
-                        disabled="@isLoading"
-                        title="Use my current location">
-                    📍
-                </button>
-                <input type="text"
-                       class="form-control"
-                       @bind="zipCode"
-                       @bind:event="oninput"
-                       placeholder="Enter ZIP code"
-                       maxlength="5"
-                       @onkeydown="HandleKeyPress" />
-                <button class="btn btn-primary" @onclick="() => GetForecast()" disabled="@isLoading">
-                    @if (isLoading)
-                    {
-                        <span>Loading...</span>
-                    }
-                    else
-                    {
-                        <span>Get Forecast</span>
-                    }
-                </button>
-                <button class="btn btn-outline-secondary"
-                        @onclick="() => RefreshForecast()"
-                        disabled="@isLoading"
-                        title="Force refresh forecast (bypasses 5-min cache)">
-                    🔄
-                </button>
+            <div class="input-section mb-4">
+                <div class="zip-input-group">
+                    <button class="btn btn-outline-secondary btn-sm location-btn"
+                            @onclick="UseMyLocation"
+                            disabled="@isLoading"
+                            title="Use my current location">
+                        📍
+                    </button>
+                    <input type="text"
+                           class="form-control"
+                           @bind="zipCode"
+                           @bind:event="oninput"
+                           placeholder="Enter ZIP code"
+                           maxlength="5"
+                           @onkeydown="HandleKeyPress" />
+                    <button class="btn btn-primary" @onclick="() => GetForecast()" disabled="@isLoading">
+                        @if (isLoading)
+                        {
+                            <span>Loading...</span>
+                        }
+                        else
+                        {
+                            <span>Get Forecast</span>
+                        }
+                    </button>
+                    <button class="btn btn-outline-secondary"
+                            @onclick="() => RefreshForecast()"
+                            disabled="@isLoading"
+                            title="Force refresh forecast (bypasses 5-min cache)">
+                        🔄
+                    </button>
+                </div>
             </div>
         </div>
 
         @if (errorMessage != null)
         {
             <div class="alert alert-danger">@errorMessage</div>
+        }
+
+        @if (isLoading && !string.IsNullOrEmpty(loadingStatus))
+        {
+            <div class="loading-status">
+                <div class="spinner-container">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+                <div class="status-text">@loadingStatus</div>
+            </div>
         }
 
         @if (forecasts != null && forecasts.Any())
@@ -178,6 +193,7 @@
     private string zipCode = "";
     private string currentCityName = "";
     private bool isLoading = false;
+    private string loadingStatus = "";
     private string? errorMessage = null;
     private List<SnowDayForecast>? forecasts = null;
     private List<SavedLocation> savedLocations = new();
@@ -318,12 +334,31 @@
     {
         savedLocations.RemoveAll(l => l.ZipCode == zip);
         await SaveLocations();
+
+        // If we deleted the currently selected location, clear it
+        if (zipCode == zip)
+        {
+            zipCode = "";
+            forecasts = null;
+            activeAlerts = new();
+            currentCityName = "";
+        }
     }
 
     private async Task LoadSavedLocation(string locationCode)
     {
         // Only handle regular ZIP codes (we filtered out LOC: entries)
         zipCode = locationCode;
+
+        // Update the LastUsed timestamp for this location
+        // But DON'T re-sort yet - wait until forecast completes successfully
+        var location = savedLocations.FirstOrDefault(l => l.ZipCode == locationCode);
+        if (location != null)
+        {
+            location.LastUsed = DateTime.Now;
+            // Don't save yet - will be saved after successful forecast
+        }
+
         await GetForecast();
     }
 
@@ -343,13 +378,21 @@
             return;
         }
 
+        // Clear previous forecast and show loading
         errorMessage = null;
         forecasts = null;
+        activeAlerts = new();
         isLoading = true;
+        loadingStatus = "Getting location data...";
+        StateHasChanged();
+        await Task.Delay(10); // Allow UI to update
 
         try
         {
-            // Step 1: Convert ZIP to coordinates
+            // Step 1: Convert ZIP to coordinates AND get city name from ZIP
+            loadingStatus = "Getting location data...";
+            StateHasChanged();
+
             var coords = await WeatherService.GetCoordinatesFromZip(zipCode);
             if (coords == null)
             {
@@ -357,7 +400,14 @@
                 return;
             }
 
-            // Step 2: Get weather forecast and location
+            // Get the actual city name for this ZIP code (not the NWS location)
+            var (zipCityName, zipState) = await WeatherService.GetCityNameFromZip(zipCode);
+            currentCityName = string.IsNullOrEmpty(zipState) ? zipCityName : $"{zipCityName}, {zipState}";
+
+            // Step 2: Get weather forecast
+            loadingStatus = "Getting weather forecast...";
+            StateHasChanged();
+
             var (weatherData, nwsCity, nwsState) = await WeatherService.GetWeatherForecast(coords.Value.lat, coords.Value.lon);
             if (weatherData == null)
             {
@@ -365,10 +415,34 @@
                 return;
             }
 
-            // Step 3: Get historical weather data (last 3 days)
+            // Step 3: Get climate data (cached in localStorage)
+            loadingStatus = "Getting climate data...";
+            StateHasChanged();
+
+            var geography = new GeographyContext
+            {
+                State = zipState, // Use ZIP state, not NWS state
+                Latitude = coords.Value.lat,
+                Longitude = coords.Value.lon
+            };
+
+            // This will use localStorage cache automatically
+            var climateData = await WeatherService.GetClimateDataAsync(geography.Latitude, geography.Longitude);
+            if (climateData != null)
+            {
+                geography.AvgAnnualSnowfall = climateData.AvgAnnualSnowfall;
+            }
+
+            // Step 4: Get historical weather data (last 3 days)
+            loadingStatus = "Getting recent weather history...";
+            StateHasChanged();
+
             var historicalWeather = await WeatherService.GetRecentWeather(coords.Value.lat, coords.Value.lon, daysBack: 3);
 
-            // Step 3.5: Get active weather alerts
+            // Step 5: Get active weather alerts
+            loadingStatus = "Checking weather alerts...";
+            StateHasChanged();
+
             var allAlerts = await WeatherService.GetActiveAlerts(coords.Value.lat, coords.Value.lon);
 
             // Filter to only relevant alerts for the 7-day forecast window
@@ -403,51 +477,13 @@
                 return true;
             }).ToList();
 
-            // Step 4: Determine location (prefer NWS, fallback to geocoding)
-            string finalCity = "";
-            string finalState = nwsState; // NWS state is most reliable
-
-            if (!string.IsNullOrEmpty(nwsCity) && !string.IsNullOrEmpty(nwsState))
-            {
-                // NWS gave us good data
-                finalCity = nwsCity;
-                finalState = nwsState;
-                Console.WriteLine($"Using NWS location: {finalCity}, {finalState}");
-            }
-            else
-            {
-                // Fallback: try geocoding with the ZIP code we have
-                Console.WriteLine($"NWS didn't provide location, trying geocoding with ZIP: {zipCode}");
-
-                if (!string.IsNullOrEmpty(zipCode))
-                {
-                    var (cityName, state) = await WeatherService.GetCityNameFromZip(zipCode);
-                    finalCity = cityName;
-                    if (string.IsNullOrEmpty(finalState))
-                        finalState = state;
-                    Console.WriteLine($"Using geocoding location: {finalCity}, {finalState}");
-                }
-                else
-                {
-                    // No ZIP and no NWS data - use coordinates fallback
-                    finalCity = $"Location ({coords.Value.lat:F2}, {coords.Value.lon:F2})";
-                    Console.WriteLine($"No city data available, using coordinates");
-                }
-            }
-
-            currentCityName = string.IsNullOrEmpty(finalState) ? finalCity : $"{finalCity}, {finalState}";
-
-            // Step 5: Create geography context
-            var geography = new GeographyContext
-            {
-                State = finalState,
-                Latitude = coords.Value.lat
-            };
-
-            Console.WriteLine($"Geography - State: {geography.State}, Tolerance: {geography.SnowToleranceMultiplier}%");
-
             // Step 6: Calculate snow day chances WITH historical context AND alerts
-            forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography, historicalWeather, activeAlerts);
+            loadingStatus = "Calculating snow day probabilities...";
+            StateHasChanged();
+
+            forecasts = await WeatherService.CalculateSnowDayChancesAsync(weatherData, geography, historicalWeather, activeAlerts);
+
+            Console.WriteLine($"Geography - State: {geography.State}, Preparedness: {geography.PreparednessIndex:F2}, Snowfall: {geography.AvgAnnualSnowfall}\"");
 
             if (!forecasts.Any())
             {
@@ -455,11 +491,11 @@
             }
             else
             {
-                // Only save if it's a new location (not already in saved list)
-                if (!savedLocations.Any(l => l.ZipCode == zipCode))
-                {
-                    await AddOrUpdateSavedLocation(zipCode, currentCityName);
-                }
+                // Save or update location with current timestamp
+                await AddOrUpdateSavedLocation(zipCode, currentCityName, updateLastUsed: true);
+
+                // Force UI update after re-sort
+                StateHasChanged();
 
                 // Update cache
                 cachedZipCode = zipCode;
@@ -474,6 +510,7 @@
         finally
         {
             isLoading = false;
+            loadingStatus = "";
         }
     }
 
@@ -489,9 +526,14 @@
 
     private async Task UseMyLocation()
     {
+        // Clear previous forecast and show loading
         errorMessage = null;
         forecasts = null;
+        activeAlerts = new();
         isLoading = true;
+        loadingStatus = "Getting your location...";
+        StateHasChanged();
+        await Task.Delay(10); // Allow UI to update
 
         try
         {
@@ -503,7 +545,17 @@
 
                 Console.WriteLine($"Got location: {position.Latitude}, {position.Longitude}");
 
+                // Get city name from coordinates
+                loadingStatus = "Getting location name...";
+                StateHasChanged();
+
+                var (cityName, state) = await WeatherService.GetCityNameFromCoordinates(position.Latitude, position.Longitude);
+                currentCityName = string.IsNullOrEmpty(state) ? cityName : $"{cityName}, {state}";
+
                 // Get weather forecast
+                loadingStatus = "Getting weather forecast...";
+                StateHasChanged();
+
                 var (weatherData, nwsCity, nwsState) = await WeatherService.GetWeatherForecast(position.Latitude, position.Longitude);
                 if (weatherData == null)
                 {
@@ -511,10 +563,34 @@
                     return;
                 }
 
+                // Get climate data (cached in localStorage)
+                loadingStatus = "Getting climate data...";
+                StateHasChanged();
+
+                var geography = new GeographyContext
+                {
+                    State = state,
+                    Latitude = position.Latitude,
+                    Longitude = position.Longitude
+                };
+
+                // This will use localStorage cache automatically
+                var climateData = await WeatherService.GetClimateDataAsync(geography.Latitude, geography.Longitude);
+                if (climateData != null)
+                {
+                    geography.AvgAnnualSnowfall = climateData.AvgAnnualSnowfall;
+                }
+
                 // Get historical weather data (last 3 days)
+                loadingStatus = "Getting recent weather history...";
+                StateHasChanged();
+
                 var historicalWeather = await WeatherService.GetRecentWeather(position.Latitude, position.Longitude, daysBack: 3);
 
                 // Get active weather alerts
+                loadingStatus = "Checking weather alerts...";
+                StateHasChanged();
+
                 var allAlertsForLocation = await WeatherService.GetActiveAlerts(position.Latitude, position.Longitude);
 
                 // Filter to only relevant alerts for the 7-day forecast window
@@ -540,31 +616,13 @@
                     return true;
                 }).ToList();
 
-                // Use NWS data if available, otherwise geocode
-                string finalCity = nwsCity;
-                string finalState = nwsState;
+                // Calculate snow day chances
+                loadingStatus = "Calculating snow day probabilities...";
+                StateHasChanged();
 
-                if (string.IsNullOrEmpty(finalCity) || string.IsNullOrEmpty(finalState))
-                {
-                    var (cityName, state) = await WeatherService.GetCityNameFromCoordinates(position.Latitude, position.Longitude);
-                    finalCity = cityName;
-                    if (string.IsNullOrEmpty(finalState))
-                        finalState = state;
-                }
+                forecasts = await WeatherService.CalculateSnowDayChancesAsync(weatherData, geography, historicalWeather, activeAlerts);
 
-                currentCityName = string.IsNullOrEmpty(finalState) ? finalCity : $"{finalCity}, {finalState}";
-
-                // Create geography context
-                var geography = new GeographyContext
-                {
-                    State = finalState,
-                    Latitude = position.Latitude
-                };
-
-                Console.WriteLine($"Location-based geography - State: {geography.State}, Tolerance: {geography.SnowToleranceMultiplier}%");
-
-                // Calculate snow day chances WITH historical context
-                forecasts = WeatherService.CalculateSnowDayChances(weatherData, geography, historicalWeather, activeAlerts);
+                Console.WriteLine($"Location-based geography - State: {geography.State}, Preparedness: {geography.PreparednessIndex:F2}, Snowfall: {geography.AvgAnnualSnowfall}\"");
 
                 if (!forecasts.Any())
                 {
@@ -593,6 +651,7 @@
         finally
         {
             isLoading = false;
+            loadingStatus = "";
         }
     }
 
@@ -618,7 +677,7 @@
 
 <style>
     .input-section {
-        max-width: 600px;
+        max-width: 100%;
     }
 
     .zip-input-group {
@@ -892,5 +951,25 @@
         font-size: 0.75rem;
         color: #666;
         font-style: italic;
+    }
+
+    /* Loading status styles */
+    .loading-status {
+        text-align: center;
+        padding: 3rem 2rem;
+        margin: 2rem 0;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border: 2px solid #dee2e6;
+    }
+
+    .spinner-container {
+        margin-bottom: 1rem;
+    }
+
+    .status-text {
+        font-size: 1.1rem;
+        color: #666;
+        font-weight: 500;
     }
 </style>

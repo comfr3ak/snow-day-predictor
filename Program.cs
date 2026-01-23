@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
+using Microsoft.JSInterop;
 using SnowDayPredictor;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
@@ -14,7 +15,8 @@ builder.Services.AddScoped<SnowDayPredictor.Services.WeatherService>(sp =>
 {
     var httpClient = new HttpClient();
     httpClient.DefaultRequestHeaders.Add("User-Agent", "SnowDayPredictor/1.0");
-    return new SnowDayPredictor.Services.WeatherService(httpClient);
+    var jsRuntime = sp.GetRequiredService<IJSRuntime>();  // ADD THIS LINE
+    return new SnowDayPredictor.Services.WeatherService(httpClient, jsRuntime);  // ADD jsRuntime parameter
 });
 
 await builder.Build().RunAsync();

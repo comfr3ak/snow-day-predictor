@@ -6,70 +6,111 @@
     <div class="main-content">
         <h1>About Snow Day Predictor</h1>
 
-        <p>Snow Day Predictor helps you estimate the likelihood of school closures and delays due to winter weather, with geography-aware calculations that account for regional snow tolerance.</p>
+        <p>Snow Day Predictor helps you estimate the likelihood of school closures and delays due to winter weather, with intelligent geography-aware calculations that dynamically adjust based on your region's snow preparedness and tolerance.</p>
 
         <h3>How It Works</h3>
-        <p>Our advanced algorithm analyzes weather forecasts and calculates both <strong>closure</strong> and <strong>delay</strong> probabilities based on multiple factors:</p>
+        <p>Our advanced algorithm analyzes real-time weather forecasts and historical weather data to calculate both <strong>closure</strong> and <strong>delay</strong> probabilities based on multiple factors:</p>
 
         <h4>Weather Conditions Analyzed:</h4>
         <ul>
-            <li><strong>Temperature:</strong> Below-freezing conditions increase accumulation likelihood and dangerous road conditions</li>
-            <li><strong>Snowfall Amount:</strong> Expected accumulation in inches (when available from NWS forecasts)</li>
+            <li><strong>Temperature:</strong> Below-freezing conditions increase accumulation likelihood and dangerous road conditions. Colder temperatures amplify the impact of snow and ice.</li>
+            <li><strong>Snowfall Amount:</strong> Expected accumulation in inches, extracted from NWS forecasts or estimated from forecast descriptions</li>
+            <li><strong>Ice Accumulation:</strong> Freezing rain and sleet are weighted more heavily than snow due to extreme danger</li>
             <li><strong>Precipitation Type:</strong> Snow, sleet, freezing rain, and wintry mix predictions</li>
-            <li><strong>Precipitation Probability:</strong> Higher chances mean more reliable forecasts</li>
-            <li><strong>Overnight Conditions:</strong> Snow or ice the night before significantly impacts morning commute safety</li>
-            <li><strong>Forecast Severity:</strong> Keywords like "heavy snow," "blizzard," or "freezing rain" boost probabilities</li>
+            <li><strong>Precipitation Probability:</strong> Higher chances mean more reliable forecasts and are factored into final probabilities</li>
+            <li><strong>Recent Weather History:</strong> The algorithm considers snow events from the past 3 days to predict multi-day aftermath closures</li>
+            <li><strong>Active Weather Alerts:</strong> Winter Storm Warnings, Watches, and Advisories from the National Weather Service boost closure probabilities</li>
         </ul>
 
-        <h4>Geography-Aware Intelligence:</h4>
-        <p>The algorithm adjusts predictions based on your location's snow tolerance:</p>
+        <h4>Dynamic Geography-Aware Intelligence:</h4>
+        <p>Rather than using fixed regional categories, the algorithm dynamically calculates your location's snow preparedness using:</p>
         <ul>
-            <li><strong>Southern States</strong> (FL, GA, SC, AL, MS, LA, TX, AR): Very low snow tolerance - even 1-2 inches can trigger closures. Schools may remain closed for 2-3 days after a winter event.</li>
-            <li><strong>Mid-South</strong> (NC, TN, KY, VA, WV): Low to moderate tolerance - closures likely with 3+ inches. May see 1-2 day closures for significant events.</li>
-            <li><strong>Mid-Atlantic/Lower Midwest</strong> (MD, DE, NJ, PA, OH, IN, MO): Moderate tolerance - 4-6 inches typically needed for closures.</li>
-            <li><strong>Northeast/Upper Midwest</strong> (NY, New England, MI, WI, IL, MN): High tolerance - schools operate in moderate snow, closures mainly for 8+ inches or blizzard conditions.</li>
-            <li><strong>Mountain/Northern States</strong> (MT, WY, CO, ID, ND, SD, AK): Very high tolerance - closures rare except for extreme conditions.</li>
+            <li><strong>Average Annual Snowfall:</strong> Retrieved from NOAA climate data for your specific coordinates</li>
+            <li>
+                <strong>Dynamic Closure Thresholds:</strong> Automatically calculated based on local snowfall patterns
+                <ul>
+                    <li>Locations with &lt;10" annual snowfall: ~1.2-1.5" threshold</li>
+                    <li>Locations with 10-30" annual snowfall: ~2.0-2.5" threshold</li>
+                    <li>Locations with 30-50" annual snowfall: ~3.0-3.5" threshold</li>
+                    <li>Locations with 50+" annual snowfall: ~3.5-4.5" threshold</li>
+                </ul>
+            </li>
+            <li><strong>Preparedness Multiplier:</strong> Regions less accustomed to snow see higher closure probabilities for the same amount of snow</li>
+            <li><strong>Aftermath Duration:</strong> Areas with lower preparedness experience longer-lasting impacts from winter events</li>
+        </ul>
+
+        <h4>Multi-Day Aftermath Analysis:</h4>
+        <p>A major enhancement: the algorithm now tracks recent snow events and predicts aftermath closures for days following winter weather:</p>
+        <ul>
+            <li><strong>Historical Context:</strong> Analyzes the last 3 days of actual weather data to detect snow events</li>
+            <li>
+                <strong>Carryover Effects:</strong> Predicts continued closures based on:
+                <ul>
+                    <li>Original snow amount relative to regional threshold</li>
+                    <li>Days since the event (with natural decay over time)</li>
+                    <li>Current temperature and melting conditions</li>
+                    <li>Regional snow removal capabilities</li>
+                </ul>
+            </li>
+            <li><strong>Smart Decay:</strong> Closure probabilities decrease each day but account for refreezing, limited equipment, and clearing progress</li>
+            <li><strong>Temperature Awareness:</strong> Above-freezing temperatures accelerate the decay of aftermath probabilities as snow melts</li>
         </ul>
 
         <h4>Closure vs. Delay:</h4>
         <ul>
-            <li><strong>Closures:</strong> Full school cancellations, typically for significant accumulation, dangerous temperatures, or when road conditions are unsafe</li>
-            <li><strong>Delays:</strong> 1-2 hour delays for marginal conditions, light accumulation, or when road crews need extra time to clear routes. Often used when overnight weather improves by morning.</li>
-        </ul>
-
-        <h4>Multi-Day Impact:</h4>
-        <p>In regions with low snow tolerance, a major winter event can cause closures for multiple consecutive days as:</p>
-        <ul>
-            <li>Roads remain uncleared or dangerous</li>
-            <li>Refreezing occurs overnight</li>
-            <li>Limited snow removal equipment availability</li>
+            <li><strong>Closures:</strong> Full school cancellations, typically for significant accumulation, dangerous temperatures, or when road conditions are unsafe. Maximum probability shown: 95%</li>
+            <li><strong>Delays:</strong> 1-2 hour delays for marginal conditions, light accumulation, or when road crews need extra time to clear routes. Often used when overnight weather improves by morning. Maximum probability shown: 95%</li>
+            <li><strong>Inverse Relationship:</strong> Higher closure probabilities generally mean lower delay probabilities (and vice versa), reflecting real-world school decision patterns</li>
         </ul>
 
         <h3>Data Sources</h3>
-        <p>Weather data is provided by:</p>
+        <p>Weather and climate data is provided by:</p>
         <ul>
-            <li><strong>National Weather Service (NOAA):</strong> Official forecast data and winter weather advisories</li>
+            <li><strong>National Weather Service (NOAA):</strong> Real-time forecast data and active winter weather advisories</li>
+            <li><strong>Open-Meteo Historical Weather API:</strong> Recent weather history for aftermath calculations</li>
+            <li><strong>NOAA Climate Data:</strong> Average annual snowfall for your specific coordinates</li>
             <li><strong>Zippopotam.us:</strong> ZIP code to city/state lookup</li>
-            <li><strong>OpenStreetMap Nominatim:</strong> Geocoding and reverse geocoding services</li>
+        </ul>
+
+        <h3>Intelligent Caching</h3>
+        <p>To provide fast, reliable service while respecting API rate limits:</p>
+        <ul>
+            <li><strong>Forecast Cache:</strong> Weather forecasts are cached for 5 minutes (can be force-refreshed)</li>
+            <li><strong>Climate Data Cache:</strong> Average snowfall data is cached permanently in your browser's localStorage since it rarely changes</li>
+            <li><strong>Smart Updates:</strong> Only forecast data refreshes on demand; climate data persists across sessions</li>
         </ul>
 
         <h3>Accuracy & Limitations</h3>
         <p>While our algorithm considers many factors, please note:</p>
         <ul>
-            <li>Predictions are based on weather <strong>forecasts</strong>, which can change</li>
-            <li>Local road conditions, staffing, and district policies vary significantly</li>
+            <li>Predictions are based on weather <strong>forecasts</strong>, which can and do change, especially beyond 3-4 days</li>
+            <li>The algorithm provides <strong>probability estimates up to 95%</strong>, never certainties - there's always some chance circumstances differ</li>
+            <li>Local road conditions, staffing, and district policies vary significantly and cannot be predicted</li>
             <li>Rural vs. urban areas within the same district may have different impacts</li>
-            <li>The algorithm provides <strong>probability estimates</strong>, not certainties</li>
-            <li>Forecast accuracy decreases beyond 3-4 days out</li>
+            <li>Aftermath predictions rely on recent weather history and may not account for extraordinary clearing efforts</li>
+            <li>School administrators make final decisions based on many factors beyond weather alone</li>
         </ul>
 
         <h3>Technology</h3>
         <p>Snow Day Predictor is built with:</p>
         <ul>
             <li><strong>Blazor WebAssembly:</strong> Modern C# web framework running entirely in your browser</li>
-            <li><strong>.NET 8:</strong> Microsoft's latest application platform</li>
-            <li><strong>Client-side caching:</strong> Reduces API calls and respects rate limits (5-minute cache)</li>
-            <li><strong>Browser localStorage:</strong> Saves your favorite locations locally on your device</li>
+            <li><strong>.NET 9:</strong> Microsoft's latest application platform</li>
+            <li><strong>Client-side caching:</strong> Smart multi-tier caching reduces API calls and respects rate limits</li>
+            <li><strong>Browser localStorage:</strong> Saves your favorite locations and climate data locally on your device</li>
+            <li><strong>Progressive Enhancement:</strong> Status messages and loading indicators provide clear feedback during data retrieval</li>
+        </ul>
+
+        <h3>Recent Improvements</h3>
+        <p>Latest updates to the Snow Day Predictor:</p>
+        <ul>
+            <li><strong>Dynamic Threshold Algorithm:</strong> Closure thresholds now calculated from actual climate data rather than fixed by state</li>
+            <li><strong>Multi-Day Aftermath Tracking:</strong> Predicts closure probabilities for days following winter events</li>
+            <li><strong>Improved Location Accuracy:</strong> Shows your ZIP code's actual city name instead of nearby NWS reference locations</li>
+            <li><strong>Enhanced Loading Experience:</strong> Clear status messages show progress during forecast retrieval</li>
+            <li><strong>Persistent Climate Cache:</strong> Climate data cached permanently in localStorage for instant load times</li>
+            <li><strong>Smart Saved Locations:</strong> Most recently used location automatically loads and stays selected</li>
+            <li><strong>Probability Caps:</strong> Maximum probabilities capped at 95% to acknowledge inherent uncertainty</li>
         </ul>
 
         <h3>Disclaimer</h3>
@@ -77,10 +118,11 @@
             Snow Day Predictor is for <strong>informational and entertainment purposes only</strong>.
             Actual school closures and delays depend on many factors including local policies, road conditions,
             administrator decisions, bus routes, and real-time weather developments. The percentages shown are
-            <strong>estimates based on historical patterns and current forecasts</strong>, not official predictions.
+            <strong>probability estimates based on historical patterns, climate data, and current forecasts</strong>, not official predictions or certainties.
             <br><br>
             <strong>Always check official sources</strong> for school closure announcements, including your school district's
-            website, local news, and emergency notification systems.
+            website, local news, and emergency notification systems. No prediction algorithm can account for all local factors
+            that influence school closure decisions.
         </p>
 
         <h3>Privacy</h3>
@@ -89,10 +131,10 @@
         </p>
         <ul>
             <li><strong>No data collection:</strong> We don't collect, store, or transmit any personal information</li>
-            <li><strong>Local storage only:</strong> Saved locations are stored in your browser's localStorage and never leave your device</li>
+            <li><strong>Local storage only:</strong> Saved locations and climate data are stored in your browser's localStorage and never leave your device</li>
             <li><strong>No tracking:</strong> No cookies, analytics, or third-party tracking scripts</li>
             <li><strong>Location data:</strong> If you choose "Use My Location," coordinates are used only to fetch weather data and are not stored or transmitted elsewhere</li>
-            <li><strong>API calls:</strong> Weather requests go directly to public government APIs (NWS, Census) and mapping services (OpenStreetMap)</li>
+            <li><strong>API calls:</strong> Weather requests go directly to public government APIs (NOAA, Open-Meteo) and mapping services</li>
         </ul>
 
         <h3>Open Source</h3>
@@ -102,7 +144,7 @@
         </p>
 
         <div class="mt-4">
-            <a href="https://comfr3ak.github.io/snow-day-predictor/" class="btn btn-primary">← Back to Forecast</a>
+            <a href="/" class="btn btn-primary">← Back to Forecast</a>
         </div>
     </div>
 </div>

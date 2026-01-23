@@ -1,35 +1,38 @@
-﻿@using SnowDayPredictor.Models
+﻿@* SavedLocations.razor - Dropdown for saved locations *@
+@using SnowDayPredictor.Models
 
-<div class="saved-locations-dropdown">
-    @if (locations != null && locations.Any())
-    {
-        <label for="saved-locations-select">Saved Locations:</label>
-        <div class="select-wrapper">
-            <select id="saved-locations-select"
+@if (locations != null && locations.Any())
+{
+    <div class="saved-locations mb-3">
+        <label for="savedLocationSelect" class="form-label">📌 Saved Locations</label>
+        <div class="saved-location-group">
+            <select id="savedLocationSelect"
                     class="form-select"
-                    @bind="selectedZip"
-                    @bind:after="OnSelectionChanged">
-                <option value="">Select a saved location...</option>
+                    value="@CurrentZipCode"
+                    @onchange="OnSelectionChanged">
+                <option value="">-- Select a saved location --</option>
                 @foreach (var location in locations)
                 {
-                    <option value="@location.ZipCode">@location.CityName (@location.ZipCode)</option>
+                    <option value="@location.ZipCode">
+                        @location.CityName (@location.ZipCode)
+                    </option>
                 }
             </select>
-            @if (!string.IsNullOrEmpty(selectedZip))
+            @if (!string.IsNullOrEmpty(CurrentZipCode) && locations.Any(l => l.ZipCode == CurrentZipCode))
             {
-                <button class="btn btn-sm btn-outline-danger delete-btn"
+                <button class="btn btn-outline-danger btn-sm delete-btn"
                         @onclick="DeleteCurrentLocation"
-                        title="Delete this location">
+                        title="Delete this saved location">
                     🗑️
                 </button>
             }
         </div>
-    }
-</div>
+    </div>
+}
 
 @code {
     [Parameter]
-    public List<SavedLocation>? locations { get; set; }
+    public List<SavedLocation> locations { get; set; } = new();
 
     [Parameter]
     public EventCallback<string> OnLocationSelected { get; set; }
@@ -37,11 +40,13 @@
     [Parameter]
     public EventCallback<string> OnLocationDeleted { get; set; }
 
-    private string selectedZip = "";
+    [Parameter]
+    public string? CurrentZipCode { get; set; }
 
-    private async Task OnSelectionChanged()
+    private async Task OnSelectionChanged(ChangeEventArgs e)
     {
-        if (!string.IsNullOrEmpty(selectedZip) && selectedZip != "")
+        var selectedZip = e.Value?.ToString() ?? "";
+        if (!string.IsNullOrEmpty(selectedZip))
         {
             await OnLocationSelected.InvokeAsync(selectedZip);
         }
@@ -49,46 +54,36 @@
 
     private async Task DeleteCurrentLocation()
     {
-        if (!string.IsNullOrEmpty(selectedZip))
+        if (!string.IsNullOrEmpty(CurrentZipCode))
         {
-            await OnLocationDeleted.InvokeAsync(selectedZip);
-            selectedZip = ""; // Reset selection after delete
+            await OnLocationDeleted.InvokeAsync(CurrentZipCode);
         }
-    }
-
-    // Public method to update selection from parent
-    public void SetSelectedZip(string zip)
-    {
-        selectedZip = zip;
-        StateHasChanged();
     }
 }
 
 <style>
-    .saved-locations-dropdown {
-        margin-bottom: 1rem;
+    .saved-locations {
+        max-width: 100%;
     }
 
-        .saved-locations-dropdown label {
-            font-size: 0.9rem;
-            font-weight: 500;
-            color: #333;
-            margin-bottom: 0.5rem;
-            display: block;
-        }
-
-    .select-wrapper {
+    .saved-location-group {
         display: flex;
         gap: 0.5rem;
-        align-items: center;
+        align-items: stretch;
     }
 
-        .select-wrapper .form-select {
+        .saved-location-group .form-select {
             flex: 1;
         }
 
     .delete-btn {
         padding: 0.375rem 0.75rem;
-        white-space: nowrap;
+        font-size: 1rem;
+        line-height: 1.5;
+    }
+
+    .form-label {
+        font-weight: 600;
+        margin-bottom: 0.5rem;
     }
 </style>

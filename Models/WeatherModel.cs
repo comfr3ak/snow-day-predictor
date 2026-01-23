@@ -56,7 +56,6 @@
         public string ShortForecast { get; set; } = "";
         public string DetailedForecast { get; set; } = "";
         public ProbabilityOfPrecipitation? ProbabilityOfPrecipitation { get; set; }
-
         public QuantitativeValue? SnowfallAmount { get; set; }
         public QuantitativeValue? IceAccumulation { get; set; }
     }
@@ -67,18 +66,161 @@
         public int? Value { get; set; }
     }
 
+    public class QuantitativeValue
+    {
+        public string UnitCode { get; set; } = "";
+        public double? Value { get; set; }
+    }
+
+    // Climate data from Cloudflare Worker
+    public class ClimateDataResponse
+    {
+        public double AvgAnnualSnowfall { get; set; }
+        public string Source { get; set; } = "";
+        public string? StationId { get; set; }
+        public string? StationName { get; set; }
+        public int DataYears { get; set; }
+        public double Latitude { get; set; }
+        public double Longitude { get; set; }
+    }
+
+    // Historical weather data
+    public class HistoricalWeatherDay
+    {
+        public DateTime Date { get; set; }
+        public double SnowfallInches { get; set; }
+        public double TempMax { get; set; }
+        public double TempMin { get; set; }
+        public double Precipitation { get; set; }
+    }
+
+    // Open-Meteo Historical API Response
+    public class OpenMeteoHistoricalResponse
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("daily")]
+        public DailyData? Daily { get; set; }
+    }
+
+    public class DailyData
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("time")]
+        public List<string> Time { get; set; } = new();
+
+        [System.Text.Json.Serialization.JsonPropertyName("snowfall_sum")]
+        public List<double> SnowfallSum { get; set; } = new();
+
+        [System.Text.Json.Serialization.JsonPropertyName("temperature_2m_max")]
+        public List<double> TempMax { get; set; } = new();
+
+        [System.Text.Json.Serialization.JsonPropertyName("temperature_2m_min")]
+        public List<double> TempMin { get; set; } = new();
+
+        [System.Text.Json.Serialization.JsonPropertyName("precipitation_sum")]
+        public List<double> PrecipitationSum { get; set; } = new();
+    }
+
+    // Geography context with climate-based preparedness
+    public class GeographyContext
+    {
+        public string State { get; set; } = "";
+        public double Latitude { get; set; }
+        public double Longitude { get; set; }
+        public double AvgAnnualSnowfall { get; set; }
+
+        /// <summary>
+        /// Snow preparedness index based on average annual snowfall.
+        /// 0.0 = unprepared (rarely snows), 1.0 = very prepared (regular snow)
+        /// Uses sigmoid curve centered at 30 inches
+        /// </summary>
+        public double PreparednessIndex
+        {
+            get
+            {
+                // Sigmoid: 1 / (1 + e^(-0.1 * (snowfall - 30)))
+                // 0" -> ~0.05
+                // 15" -> ~0.18
+                // 30" -> ~0.50
+                // 60" -> ~0.95
+                // 100" -> ~0.9999
+                double x = AvgAnnualSnowfall - 30.0;
+                double sigmoid = 1.0 / (1.0 + Math.Exp(-0.1 * x));
+                return Math.Max(0.0, Math.Min(1.0, sigmoid));
+            }
+        }
+
+        /// <summary>
+        /// How many inches of snow typically trigger closures.
+        /// Lower preparedness = lower threshold
+        /// </summary>
+        public double ClosureThresholdInches
+        {
+            get
+            {
+                // Unprepared (0.0): 1" triggers closures
+                // Mid-prepared (0.5): 3" triggers closures
+                // Very prepared (1.0): 6" triggers closures
+                return 1.0 + (PreparednessIndex * 5.0);
+            }
+        }
+
+        /// <summary>
+        /// How many days schools typically stay closed after a snow event.
+        /// Lower preparedness = longer closures
+        /// </summary>
+        public int TypicalClosureDays
+        {
+            get
+            {
+                double p = PreparednessIndex;
+                if (p < 0.20) return 4;  // Deep south: 4+ days
+                if (p < 0.40) return 3;  // Southern tier: 3 days
+                if (p < 0.65) return 2;  // Mid-Atlantic: 2 days
+                if (p < 0.85) return 2;  // Northern mid-tier: 2 days
+                return 1;                // Far north: 1 day
+            }
+        }
+
+        /// <summary>
+        /// Daily decay rate for aftermath probabilities.
+        /// Higher preparedness = faster recovery
+        /// </summary>
+        public double AftermathDecayRate
+        {
+            get
+            {
+                // 0.0 prep -> 0.30 decay (slow recovery)
+                // 0.5 prep -> 0.50 decay (moderate)
+                // 1.0 prep -> 0.70 decay (fast recovery)
+                return 0.30 + (PreparednessIndex * 0.40);
+            }
+        }
+
+        /// <summary>
+        /// Temperature-based melt factor. How fast does snow melt?
+        /// Higher preparedness = better clearing even without melting
+        /// </summary>
+        public double GetMeltFactor(int tempF)
+        {
+            if (tempF > 40) return 0.50;  // Fast melt
+            if (tempF > 32) return 0.30;  // Moderate melt
+            if (tempF > 25) return 0.10;  // Slow melt
+            return 0.0;                    // No melt, stays frozen
+        }
+    }
+
     // Our snow day calculation result
     public class SnowDayForecast
     {
         public string DayName { get; set; } = "";
         public DateTime Date { get; set; }
         public int SnowDayChance { get; set; }
-        public int DelayChance { get; set; }  // NEW
+        public int DelayChance { get; set; }
         public int Temperature { get; set; }
         public string Forecast { get; set; } = "";
         public int PrecipitationChance { get; set; }
         public string? SnowfallAmount { get; set; }
-        public string State { get; set; } = "";  // NEW - for geography adjustments
+        public bool IsAftermathDay { get; set; }
+        public int DaysSinceSnowEvent { get; set; }
 
         public string ChanceLevel => SnowDayChance switch
         {
@@ -88,7 +230,7 @@
             _ => "Very Low"
         };
 
-        public string DelayLevel => DelayChance switch  // NEW
+        public string DelayLevel => DelayChance switch
         {
             >= 60 => "High",
             >= 35 => "Moderate",
@@ -104,7 +246,7 @@
             _ => "#28a745"      // green
         };
 
-        public string DelayColor => DelayChance switch  // NEW
+        public string DelayColor => DelayChance switch
         {
             >= 60 => "#ff6b6b",
             >= 35 => "#ffd93d",
@@ -120,123 +262,6 @@
         public string CityName { get; set; } = "";
         public DateTime LastUsed { get; set; }
     }
-
-    public class QuantitativeValue
-    {
-        public string UnitCode { get; set; } = "";
-        public double? Value { get; set; }
-    }
-
-    public class GeographyContext
-    {
-        public string State { get; set; } = "";
-        public double Latitude { get; set; }
-
-        // Derived regional impact from latitude.
-        // 1.0 = baseline, >1.0 = lower-latitude (less tolerant), <1.0 = higher-latitude (more tolerant)
-        public double LatitudeImpactFactor => Latitude switch
-        {
-            < 28.0 => 2.00,  // South FL / far South TX
-            < 30.0 => 1.85,  // Gulf Coast band
-            < 32.5 => 1.65,  // Deep South band
-            < 35.0 => 1.45,  // Southern tier
-            < 38.0 => 1.25,  // VA/MD-ish
-            < 41.0 => 1.05,  // Mid band
-            < 44.0 => 0.95,  // Great Lakes / upstate
-            < 47.0 => 0.85,  // Northern tier
-            _ => 0.75        // far north
-        };
-
-        public int SnowToleranceMultiplier
-        {
-            get
-            {
-                // Lower preparedness => multiplier > 100 (more closure prone)
-                // Higher preparedness => multiplier < 100 (less closure prone)
-                // Range roughly 60..200
-                double p = PreparednessIndex;           // 0..1
-                double multiplier = 200 - (140 * p);    // p=0 ->200, p=1 ->60
-                return (int)Math.Round(multiplier);
-            }
-        }
-
-        public int TypicalClosureDays
-        {
-            get
-            {
-                // Recovery is slower in low preparedness areas, faster in high preparedness areas
-                double p = PreparednessIndex;
-                if (p < 0.20) return 4;   // deep south-like
-                if (p < 0.40) return 3;   // southern tier
-                if (p < 0.65) return 3;   // transition zones (VA often behaves like this for big storms)
-                if (p < 0.85) return 2;   // northern mid-atlantic / midwest
-                return 1;                 // far north
-            }
-        }
-
-
-        public double PreparednessIndex
-        {
-            get
-            {
-                // Typical US snow preparedness rises with latitude.
-                // 0.0 = very unprepared, 1.0 = very prepared.
-                // Center around ~40.5 (roughly Mid-Atlantic transition), span ~6 degrees.
-                double x = (Latitude - 40.5) / 6.0;
-
-                // Smoothstep-ish sigmoid
-                double sigmoid = 1.0 / (1.0 + Math.Exp(-x * 2.2));
-
-                // Clamp
-                if (sigmoid < 0) sigmoid = 0;
-                if (sigmoid > 1) sigmoid = 1;
-                return sigmoid;
-            }
-        }
-
-
-
-        // Optional helpers you can use elsewhere if you want ice to weigh more than snow at low latitudes.
-        // These are not required by your current code, but they are useful for future tuning.
-        public double IceAmplifier => 1.0 + System.Math.Max(0.0, LatitudeImpactFactor - 1.0) * 0.60;
-        public double SnowAmplifier => 1.0 + System.Math.Max(0.0, LatitudeImpactFactor - 1.0) * 0.30;
-
-        // Keep compatibility with existing imports:
-        // using static SnowDayPredictor.Models.GeographyContext;
-        public class HistoricalWeatherDay
-        {
-            public System.DateTime Date { get; set; }
-            public double SnowfallInches { get; set; }
-            public double TempMax { get; set; }
-            public double TempMin { get; set; }
-            public double Precipitation { get; set; }
-        }
-
-        public class OpenMeteoHistoricalResponse
-        {
-            [System.Text.Json.Serialization.JsonPropertyName("daily")]
-            public DailyData? Daily { get; set; }
-        }
-
-        public class DailyData
-        {
-            [System.Text.Json.Serialization.JsonPropertyName("time")]
-            public System.Collections.Generic.List<string> Time { get; set; } = new();
-
-            [System.Text.Json.Serialization.JsonPropertyName("snowfall_sum")]
-            public System.Collections.Generic.List<double> SnowfallSum { get; set; } = new();
-
-            [System.Text.Json.Serialization.JsonPropertyName("temperature_2m_max")]
-            public System.Collections.Generic.List<double> TempMax { get; set; } = new();
-
-            [System.Text.Json.Serialization.JsonPropertyName("temperature_2m_min")]
-            public System.Collections.Generic.List<double> TempMin { get; set; } = new();
-
-            [System.Text.Json.Serialization.JsonPropertyName("precipitation_sum")]
-            public System.Collections.Generic.List<double> PrecipitationSum { get; set; } = new();
-        }
-    }
-
 
     // NWS Weather Alerts
     public class NWSAlertsResponse
@@ -273,7 +298,8 @@
 
         [System.Text.Json.Serialization.JsonPropertyName("expires")]
         public DateTime? Expires { get; set; }
-        [System.Text.Json.Serialization.JsonPropertyName("ends")] 
+
+        [System.Text.Json.Serialization.JsonPropertyName("ends")]
         public DateTime? Ends { get; set; }
     }
 
@@ -291,9 +317,9 @@
     public enum AlertSeverity
     {
         None = 0,
-        Advisory = 1,      // Winter Weather Advisory: +15-25%
-        Watch = 2,         // Winter Storm Watch: +20-30%
-        Warning = 3,       // Winter Storm Warning: +30-50%
-        Extreme = 4        // Blizzard/Ice Storm Warning: +50-70%
+        Advisory = 1,   // Winter Weather Advisory: +15-25%
+        Watch = 2,      // Winter Storm Watch: +20-30%
+        Warning = 3,    // Winter Storm Warning: +30-50%
+        Extreme = 4     // Blizzard/Ice Storm Warning: +50-70%
     }
 }
