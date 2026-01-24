@@ -404,22 +404,51 @@ namespace SnowDayPredictor.Services
 
             Console.WriteLine($"Processing {allDailyPeriods.Count} forecast periods...");
 
-            // Start with historical snow events
-            var snowEvents = new Dictionary<DateTime, double>(historicalSnowEvents);
+            // Start with historical snow events (convert to new structure)
+            var winterEvents = new Dictionary<DateTime, WinterEvent>();
+            foreach (var evt in historicalSnowEvents)
+            {
+                winterEvents[evt.Key] = new WinterEvent
+                {
+                    EffectiveAmount = evt.Value,
+                    IsIceEvent = false,  // Historical events are snow-based
+                    OriginalIceAmount = 0
+                };
+            }
 
-            // FIRST PASS: Extract snow amounts from ALL days (including weekends) to build snow events
-            Console.WriteLine("\n=== FIRST PASS: Building snow event history ===");
+            // FIRST PASS: Extract snow AND ICE amounts from ALL days to build winter event history
+            Console.WriteLine("\n=== FIRST PASS: Building winter event history ===");
             foreach (var period in allDailyPeriods)
             {
                 var nightPeriod = periods.FirstOrDefault(p =>
                     p.StartTime.Date == period.StartTime.Date && !p.IsDaytime);
 
                 double snowAmount = ExtractSnowAmount(period, nightPeriod);
+                double iceAmount = ExtractIceAmount(period, nightPeriod);
 
-                if (snowAmount >= 1.0)
+                // Track significant winter events (snow OR ice)
+                // Ice is 3x more impactful, so even small amounts matter
+                if (snowAmount >= 1.0 || iceAmount >= 0.1)
                 {
-                    snowEvents[period.StartTime.Date] = snowAmount;
-                    Console.WriteLine($"{period.Name} ({period.StartTime.Date:MM/dd}): {snowAmount:F1}\" snow - TRACKED");
+                    // Store as effective snow (ice × 3 for impact)
+                    double effectiveAmount = snowAmount + (iceAmount * 3.0);
+                    bool isIceEvent = iceAmount >= 0.1;  // Primarily ice if we detected ice
+
+                    winterEvents[period.StartTime.Date] = new WinterEvent
+                    {
+                        EffectiveAmount = effectiveAmount,
+                        IsIceEvent = isIceEvent,
+                        OriginalIceAmount = iceAmount
+                    };
+
+                    if (isIceEvent)
+                    {
+                        Console.WriteLine($"{period.Name} ({period.StartTime.Date:MM/dd}): {iceAmount:F2}\" ice ({effectiveAmount:F2}\" effective) - TRACKED");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"{period.Name} ({period.StartTime.Date:MM/dd}): {snowAmount:F1}\" snow - TRACKED");
+                    }
                 }
             }
 
@@ -448,7 +477,7 @@ namespace SnowDayPredictor.Services
                     period.Temperature,
                     period.ProbabilityOfPrecipitation?.Value ?? 0,
                     climate,
-                    snowEvents,
+                    winterEvents,
                     alerts
                 );
 
@@ -482,7 +511,7 @@ namespace SnowDayPredictor.Services
             int temperature,
             int precipChance,
             GeographyContext climate,
-            Dictionary<DateTime, double> snowEvents,
+            Dictionary<DateTime, WinterEvent> winterEvents,
             List<WeatherAlert> alerts)
         {
             // Check for aftermath from previous snow events FIRST
@@ -490,7 +519,7 @@ namespace SnowDayPredictor.Services
                 date,
                 temperature,
                 climate,
-                snowEvents
+                winterEvents
             );
 
             // Check if this is a direct snow day (significant accumulation)
@@ -600,31 +629,43 @@ namespace SnowDayPredictor.Services
             return (finalClosureChance, Math.Min(95, delayChance));
         }
 
+        // Add this class inside WeatherService (before CalculateSnowDayProbabilitiesWithHistory)
+        private class WinterEvent
+        {
+            public double EffectiveAmount { get; set; }  // Snow or ice×3
+            public bool IsIceEvent { get; set; }          // True if primarily ice
+            public double OriginalIceAmount { get; set; } // Original ice amount
+        }
+
         /// <summary>
-        /// Calculate aftermath probabilities from previous snow events
+        /// Calculate aftermath probabilities with ice-aware logic
+        /// Ice events: High Day 1, fast decay (melts quickly above 32°F)
+        /// Snow events: Moderate Day 1, slow decay (persists longer)
         /// </summary>
         private (int closureChance, int delayChance, int daysSince) CalculateAftermathProbabilities(
             DateTime currentDate,
             int temperature,
             GeographyContext climate,
-            Dictionary<DateTime, double> snowEvents)
+            Dictionary<DateTime, WinterEvent> winterEvents)
         {
             Console.WriteLine($"  Aftermath check for {currentDate:MM/dd}:");
-            Console.WriteLine($"    Snow events in history: {snowEvents.Count}");
-            foreach (var evt in snowEvents)
+            Console.WriteLine($"    Winter events in history: {winterEvents.Count}");
+            foreach (var evt in winterEvents)
             {
-                Console.WriteLine($"      {evt.Key:MM/dd}: {evt.Value:F1}\"");
+                var type = evt.Value.IsIceEvent ? "ice" : "snow";
+                Console.WriteLine($"      {evt.Key:MM/dd}: {evt.Value.EffectiveAmount:F1}\" ({type})");
             }
 
             int maxClosureChance = 0;
             int maxDelayChance = 0;
             int closestDays = 0;
 
-            foreach (var snowEvent in snowEvents)
+            foreach (var winterEvent in winterEvents)
             {
-                var daysSince = (currentDate - snowEvent.Key).Days;
+                var daysSince = (currentDate - winterEvent.Key).Days;
+                var evt = winterEvent.Value;
 
-                Console.WriteLine($"    Checking event {snowEvent.Key:MM/dd} ({snowEvent.Value:F1}\"): {daysSince} days ago");
+                Console.WriteLine($"    Checking event {winterEvent.Key:MM/dd} ({evt.EffectiveAmount:F1}\" {(evt.IsIceEvent ? "ice" : "snow")}): {daysSince} days ago");
 
                 // Only consider events within typical closure period
                 if (daysSince <= 0)
@@ -639,60 +680,93 @@ namespace SnowDayPredictor.Services
                     continue;
                 }
 
-                var snowAmount = snowEvent.Value;
+                var effectiveAmount = evt.EffectiveAmount;
 
                 // Base aftermath probability scaled by preparedness
                 double prepFactor = 1.5 - climate.PreparednessIndex; // 0.0→1.5x, 1.0→0.5x
                 Console.WriteLine($"      Prep factor: {prepFactor:F2}");
 
-                // Calculate base probability relative to closure threshold (matches direct calculation logic)
+                // Calculate base probability relative to closure threshold
                 double threshold = climate.ClosureThresholdInches;
-                double rawRatio = snowAmount / threshold;
-                Console.WriteLine($"      Snow ratio: {snowAmount:F1}\" / {threshold:F2}\" = {rawRatio:F2}x threshold");
+                double rawRatio = effectiveAmount / threshold;
+                Console.WriteLine($"      Ratio: {effectiveAmount:F1}\" / {threshold:F2}\" = {rawRatio:F2}x threshold");
 
-                // Scale base probability by how much snow exceeded threshold
+                // Scale base probability by how much exceeded threshold
                 double baseProb;
-                if (rawRatio >= 2.5) baseProb = 98.0 * prepFactor;      // Massive storm (2.5x+ threshold)
-                else if (rawRatio >= 2.0) baseProb = 95.0 * prepFactor; // Major storm (2x+ threshold)
-                else if (rawRatio >= 1.5) baseProb = 85.0 * prepFactor; // Significant storm (1.5x+ threshold)
-                else if (rawRatio >= 1.0) baseProb = 70.0 * prepFactor; // At threshold - definitely closes
-                else if (rawRatio >= 0.75) baseProb = 50.0 * prepFactor; // Close to threshold
-                else baseProb = 30.0 * prepFactor;                        // Below threshold but still tracked
+                if (rawRatio >= 2.5) baseProb = 98.0 * prepFactor;
+                else if (rawRatio >= 2.0) baseProb = 95.0 * prepFactor;
+                else if (rawRatio >= 1.5) baseProb = 85.0 * prepFactor;
+                else if (rawRatio >= 1.0) baseProb = 70.0 * prepFactor;
+                else if (rawRatio >= 0.75) baseProb = 50.0 * prepFactor;
+                else baseProb = 30.0 * prepFactor;
 
                 baseProb = Math.Min(100, baseProb);
                 Console.WriteLine($"      Base prob: {baseProb:F1}%");
 
-                // Decay logic - keep very high for first few days
+                // ========================================================================
+                // ICE-AWARE DECAY LOGIC - Data-driven based on preparedness
+                // ========================================================================
                 double finalProb = baseProb;
 
-                if (daysSince == 1)
+                if (evt.IsIceEvent)
                 {
-                    finalProb = baseProb * 0.95;
-                    Console.WriteLine($"      Day 1 decay: {finalProb:F1}%");
-                }
-                else if (daysSince == 2)
-                {
-                    finalProb = baseProb * 0.90;
-                    Console.WriteLine($"      Day 2 decay: {finalProb:F1}%");
-                }
-                else if (daysSince == 3)
-                {
-                    finalProb = baseProb * 0.70;
-                    Console.WriteLine($"      Day 3 decay: {finalProb:F1}%");
+                    // ICE EVENTS: Critical Day 1 (power outages, black ice), fast decay after
+                    if (daysSince == 1)
+                    {
+                        // Day 1 after ice is CRITICAL - boost based on lack of preparedness
+                        // Low prep areas struggle most with power outages and ice removal
+                        double iceDay1Boost = 1.5 + (1.0 - climate.PreparednessIndex);
+                        // Examples:
+                        // - Greenville (prep 0.08): boost = 1.5 + 0.92 = 2.42x
+                        // - Chicago (prep 0.75): boost = 1.5 + 0.25 = 1.75x
+                        finalProb = Math.Min(95, baseProb * iceDay1Boost);
+                        Console.WriteLine($"      ICE Day 1 boost (×{iceDay1Boost:F2}): {finalProb:F1}%");
+                    }
+                    else
+                    {
+                        // Ice melts FAST above 32°F - apply aggressive decay
+                        // Day 2+: 50% decay per day (ice disappears quickly when melting)
+                        double iceFastDecay = 0.50;
+                        finalProb = baseProb * Math.Pow(iceFastDecay, daysSince);
+                        Console.WriteLine($"      ICE Day {daysSince} fast decay (50%/day): {finalProb:F1}%");
+                    }
                 }
                 else
                 {
-                    double decayRate = climate.AftermathDecayRate;
-                    finalProb = baseProb * Math.Pow(1.0 - decayRate, daysSince);
-                    Console.WriteLine($"      Day {daysSince} decay: {finalProb:F1}%");
+                    // SNOW EVENTS: Standard decay logic (snow persists longer)
+                    if (daysSince == 1)
+                    {
+                        finalProb = baseProb * 0.95;
+                        Console.WriteLine($"      SNOW Day 1 decay: {finalProb:F1}%");
+                    }
+                    else if (daysSince == 2)
+                    {
+                        finalProb = baseProb * 0.90;
+                        Console.WriteLine($"      SNOW Day 2 decay: {finalProb:F1}%");
+                    }
+                    else if (daysSince == 3)
+                    {
+                        finalProb = baseProb * 0.70;
+                        Console.WriteLine($"      SNOW Day 3 decay: {finalProb:F1}%");
+                    }
+                    else
+                    {
+                        double decayRate = climate.AftermathDecayRate;
+                        finalProb = baseProb * Math.Pow(1.0 - decayRate, daysSince);
+                        Console.WriteLine($"      SNOW Day {daysSince} decay: {finalProb:F1}%");
+                    }
                 }
 
-                // Apply temperature melt factor only if above freezing
+                // Apply temperature melt factor (affects both ice and snow)
                 if (temperature > 32)
                 {
                     double meltFactor = climate.GetMeltFactor(temperature);
                     double before = finalProb;
-                    finalProb *= (1.0 - meltFactor * 0.5);
+
+                    // Ice melts faster than snow, so melt factor is stronger for ice
+                    double meltMultiplier = evt.IsIceEvent ? 0.7 : 0.5;
+                    finalProb *= (1.0 - meltFactor * meltMultiplier);
+
                     Console.WriteLine($"      Temp {temperature}°F melt: {before:F1}% → {finalProb:F1}%");
                 }
 
@@ -826,21 +900,114 @@ namespace SnowDayPredictor.Services
         }
 
         /// <summary>
-        /// Extract ice accumulation from day and night periods
+        /// Extract ice accumulation from day and night periods with conservative estimation
+        /// Only estimates when forecast EXPLICITLY mentions freezing rain/ice
         /// </summary>
         private double ExtractIceAmount(Period dayPeriod, Period? nightPeriod)
         {
             double total = 0;
 
+            // First, try to get explicit ice accumulation values from NWS
             if (dayPeriod.IceAccumulation?.Value.HasValue == true)
                 total += dayPeriod.IceAccumulation.Value.Value;
 
             if (nightPeriod?.IceAccumulation?.Value.HasValue == true)
                 total += nightPeriod.IceAccumulation.Value.Value;
 
+            // If we got explicit values, return them
+            if (total > 0)
+            {
+                Console.WriteLine($"  Explicit ice accumulation from NWS: {total:F2}\"");
+                return total;
+            }
+
+            // NWS didn't provide ice values - but ONLY estimate if forecast explicitly mentions ice
+            // This prevents phantom ice creation
+
+            double dayIce = EstimateIceFromForecast(dayPeriod);
+            double nightIce = nightPeriod != null ? EstimateIceFromForecast(nightPeriod) : 0;
+
+            total = dayIce + nightIce;
+
+            if (total > 0)
+            {
+                Console.WriteLine($"  Estimated ice from forecast text: {total:F2}\" (day: {dayIce:F2}\", night: {nightIce:F2}\")");
+            }
+
             return total;
         }
 
+        /// <summary>
+        /// Estimate ice accumulation ONLY when forecast explicitly mentions freezing rain/ice
+        /// Conservative approach - no phantom ice!
+        /// </summary>
+        private double EstimateIceFromForecast(Period period)
+        {
+            Console.WriteLine($"  DEBUG: EstimateIceFromForecast called for '{period.ShortForecast}'");
+            var forecast = period.ShortForecast?.ToLower() ?? "";
+            var detailed = period.DetailedForecast?.ToLower() ?? "";
+            var precipChance = period.ProbabilityOfPrecipitation?.Value ?? 0;
+            var temp = period.Temperature;
+
+            // RULE 1: Must be at or below freezing
+            if (temp > 32)
+                return 0;
+
+            // RULE 2: Check if NWS explicitly says NO ice accumulation
+            if (detailed.Contains("little or no ice accumulation") ||
+                detailed.Contains("no ice accumulation expected"))
+            {
+                Console.WriteLine($"  DEBUG: NWS says no ice accumulation - returning 0");
+                return 0;
+            }
+
+            // RULE 3: Must explicitly mention ICE ACCUMULATION terms in PRIMARY forecast
+            // Only check SHORT forecast for primary precipitation type
+            bool hasFreezingRain = forecast.Contains("freezing rain");
+            bool hasIceStorm = forecast.Contains("ice storm");
+            bool hasGlaze = forecast.Contains("glaze") || forecast.Contains("glazing");
+            bool hasFreezingDrizzle = forecast.Contains("freezing drizzle");
+
+            // If none of these specific ice terms are in the SHORT forecast, return 0
+            if (!hasFreezingRain && !hasIceStorm && !hasGlaze && !hasFreezingDrizzle)
+            {
+                return 0; // No phantom ice!
+            }
+
+            // OK, forecast explicitly mentions ice - estimate conservatively
+            double baseIce = 0;
+
+            if (hasIceStorm)
+            {
+                baseIce = 0.25; // Quarter inch
+            }
+            else if (detailed.Contains("heavy freezing rain"))
+            {
+                baseIce = 0.15; // Heavy freezing rain
+            }
+            else if (hasFreezingRain)
+            {
+                baseIce = 0.10; // One tenth inch (very dangerous in South)
+            }
+            else if (hasFreezingDrizzle)
+            {
+                baseIce = 0.05; // Light glaze
+            }
+            else if (hasGlaze)
+            {
+                baseIce = 0.03; // Minimal glaze
+            }
+
+            // Adjust by precipitation probability
+            double adjustedIce = baseIce * (precipChance / 100.0);
+
+            if (adjustedIce > 0)
+            {
+                Console.WriteLine($"  Ice estimation for '{forecast}': temp={temp}°F, base={baseIce:F2}\", precip={precipChance}%, result={adjustedIce:F2}\"");
+            }
+
+            return adjustedIce;
+        }
 
         /// <summary>
         /// Get active weather alerts - NO CACHING, always fresh API call
