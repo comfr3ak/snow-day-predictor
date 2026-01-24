@@ -11,18 +11,18 @@ namespace SnowDayPredictor.Services
         private readonly IJSRuntime? _jsRuntime;
         private const string CloudflareWorkerUrl = "https://snow-day-climate-proxy.ncs-cee.workers.dev";
         private const string ClimateDataCacheKey = "climateDataCache";
+        private const string HistoricalWeatherCacheKey = "historicalWeatherCache";
+        private const string ZipLookupCacheKey = "zipLookupCache";
 
         public WeatherService(HttpClient httpClient)
         {
             _httpClient = httpClient;
-            //_httpClient.DefaultRequestHeaders.Add("User-Agent", "SnowDayPredictor/1.0");
             _jsRuntime = null;
         }
 
         public WeatherService(HttpClient httpClient, IJSRuntime jsRuntime)
         {
             _httpClient = httpClient;
-           // _httpClient.DefaultRequestHeaders.Add("User-Agent", "SnowDayPredictor/1.0");
             _jsRuntime = jsRuntime;
         }
 
@@ -127,98 +127,164 @@ namespace SnowDayPredictor.Services
         }
 
         /// <summary>
-        /// Get coordinates and city name from ZIP code using OpenStreetMap Nominatim geocoding
+        /// Get coordinates AND city name from ZIP code with localStorage caching (permanent cache)
+        /// Uses Zippopotam - no User-Agent required, works on iOS
+        /// Returns everything in ONE API call instead of two separate calls
         /// </summary>
         public async Task<(double lat, double lon, string city, string state)?> GetCoordinatesAndCityFromZip(string zipCode)
         {
-            try
+            // Try to get from localStorage cache first
+            if (_jsRuntime != null)
             {
-                Console.WriteLine($"Geocoding ZIP: {zipCode}");
-                // Add addressdetails=1 to get structured address components
-                var url = $"https://nominatim.openstreetmap.org/search?postalcode={zipCode}&country=US&format=json&addressdetails=1&limit=1";
-
-                // Nominatim requires a User-Agent header
-                using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                request.Headers.Add("User-Agent", "SnowDayPredictor/1.0");
-
-                var response = await _httpClient.SendAsync(request);
-                Console.WriteLine($"Geocoding response status: {response.StatusCode}");
-
-                if (!response.IsSuccessStatusCode)
+                try
                 {
-                    Console.WriteLine("Geocoding failed");
-                    return null;
-                }
-
-                var content = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"Geocoding response: {content}");
-
-                var data = await response.Content.ReadFromJsonAsync<List<Dictionary<string, JsonElement>>>();
-                if (data != null && data.Count > 0)
-                {
-                    var result = data[0];
-                    var lat = result["lat"].GetString();
-                    var lon = result["lon"].GetString();
-
-                    string city = "";
-                    string state = "";
-
-                    // Try to get structured address data
-                    if (result.ContainsKey("address"))
+                    var cachedJson = await _jsRuntime.InvokeAsync<string>("localStorage.getItem", $"{ZipLookupCacheKey}_{zipCode}");
+                    if (!string.IsNullOrEmpty(cachedJson))
                     {
-                        var address = result["address"];
-
-                        // Try multiple city fields in order of preference
-                        if (address.ValueKind == JsonValueKind.Object)
+                        var cached = System.Text.Json.JsonSerializer.Deserialize<ZipLookupData>(cachedJson);
+                        if (cached != null)
                         {
-                            var addressObj = address;
-
-                            // Try city, town, village, hamlet in order
-                            if (addressObj.TryGetProperty("city", out var cityProp))
-                                city = cityProp.GetString() ?? "";
-                            else if (addressObj.TryGetProperty("town", out var townProp))
-                                city = townProp.GetString() ?? "";
-                            else if (addressObj.TryGetProperty("village", out var villageProp))
-                                city = villageProp.GetString() ?? "";
-                            else if (addressObj.TryGetProperty("hamlet", out var hamletProp))
-                                city = hamletProp.GetString() ?? "";
-
-                            // Get state
-                            if (addressObj.TryGetProperty("state", out var stateProp))
-                            {
-                                var stateName = stateProp.GetString() ?? "";
-                                // Convert full state name to abbreviation if needed
-                                state = ConvertStateToAbbreviation(stateName);
-                            }
+                            Console.WriteLine($"Using cached ZIP lookup for {zipCode}: {cached.City}, {cached.State} at {cached.Lat}, {cached.Lon}");
+                            return (cached.Lat, cached.Lon, cached.City, cached.State);
                         }
                     }
-
-                    // Fallback: parse display_name if address parsing failed
-                    if (string.IsNullOrEmpty(city) && result.ContainsKey("display_name"))
-                    {
-                        var displayName = result["display_name"].GetString() ?? "";
-                        var parts = displayName.Split(',').Select(p => p.Trim()).ToArray();
-                        if (parts.Length > 0)
-                            city = parts[0];
-                    }
-
-                    // Final fallback
-                    if (string.IsNullOrEmpty(city))
-                        city = "Unknown City";
-
-                    Console.WriteLine($"Location found: {city}, {state} at {lat}, {lon}");
-                    return (double.Parse(lat!), double.Parse(lon!), city, state);
                 }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error reading ZIP lookup cache: {ex.Message}");
+                }
+            }
 
-                Console.WriteLine("No geocoding results found");
+            // Not in cache - fetch from API
+            double lat = 0;
+            double lon = 0;
+            string city = "";
+            string state = "";
+
+            // Try Zippopotam.us (no User-Agent required, works on iOS)
+            // Returns BOTH coordinates AND city name in ONE call
+            try
+            {
+                Console.WriteLine($"Fetching location data for ZIP {zipCode} from Zippopotam...");
+                var url = $"https://api.zippopotam.us/us/{zipCode}";
+
+                var response = await _httpClient.GetAsync(url);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    using var doc = System.Text.Json.JsonDocument.Parse(content);
+                    var root = doc.RootElement;
+
+                    if (root.TryGetProperty("places", out var places) && places.GetArrayLength() > 0)
+                    {
+                        var place = places[0];
+
+                        // Get coordinates
+                        if (place.TryGetProperty("latitude", out var latElement))
+                            lat = double.Parse(latElement.GetString() ?? "0");
+
+                        if (place.TryGetProperty("longitude", out var lonElement))
+                            lon = double.Parse(lonElement.GetString() ?? "0");
+
+                        // Get city name
+                        if (place.TryGetProperty("place name", out var placeNameElement))
+                            city = placeNameElement.GetString() ?? "";
+
+                        // Get state abbreviation
+                        if (place.TryGetProperty("state abbreviation", out var stateAbbrElement))
+                            state = stateAbbrElement.GetString() ?? "";
+
+                        if (lat != 0 && lon != 0 && !string.IsNullOrEmpty(city) && !string.IsNullOrEmpty(state))
+                        {
+                            Console.WriteLine($"✓ Zippopotam success: {city}, {state} at {lat}, {lon}");
+
+                            // Cache the result permanently in localStorage
+                            if (_jsRuntime != null)
+                            {
+                                try
+                                {
+                                    var cacheData = new ZipLookupData
+                                    {
+                                        Lat = lat,
+                                        Lon = lon,
+                                        City = city,
+                                        State = state
+                                    };
+                                    var json = System.Text.Json.JsonSerializer.Serialize(cacheData);
+                                    await _jsRuntime.InvokeVoidAsync("localStorage.setItem", $"{ZipLookupCacheKey}_{zipCode}", json);
+                                    Console.WriteLine($"Cached ZIP lookup data for {zipCode}");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"Error caching ZIP lookup: {ex.Message}");
+                                }
+                            }
+
+                            return (lat, lon, city, state);
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Geocoding error: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                Console.WriteLine($"✗ Zippopotam error: {ex.Message}");
             }
 
+            // Fallback: Use ZIP prefix to get state at minimum
+            state = GetStateFromZipPrefix(zipCode);
+            if (!string.IsNullOrEmpty(state))
+            {
+                Console.WriteLine($"✓ Using ZIP prefix fallback: {zipCode} → {state} (no coordinates available)");
+                city = $"ZIP {zipCode}";
+
+                // For fallback, we don't have coordinates, so return null
+                // The calling code will handle this appropriately
+                return null;
+            }
+
+            // Complete failure
+            Console.WriteLine($"✗ All lookups failed for ZIP: {zipCode}");
             return null;
+        }
+
+        /// <summary>
+        /// Get coordinates from ZIP code (wrapper for backward compatibility)
+        /// </summary>
+        public async Task<(double lat, double lon)?> GetCoordinatesFromZip(string zipCode)
+        {
+            var result = await GetCoordinatesAndCityFromZip(zipCode);
+            return result.HasValue ? (result.Value.lat, result.Value.lon) : null;
+        }
+
+        /// <summary>
+        /// Get city name from ZIP code (wrapper for backward compatibility)
+        /// </summary>
+        public async Task<(string city, string state)> GetCityNameFromZip(string zipCode)
+        {
+            var result = await GetCoordinatesAndCityFromZip(zipCode);
+            if (result.HasValue)
+            {
+                return (result.Value.city, result.Value.state);
+            }
+
+            // Fallback to ZIP prefix if lookup failed
+            var state = GetStateFromZipPrefix(zipCode);
+            if (!string.IsNullOrEmpty(state))
+            {
+                return ($"ZIP {zipCode}", state);
+            }
+
+            return ($"ZIP {zipCode}", "");
+        }
+
+        // Add this helper class at the end of the WeatherService class (before the closing brace):
+        private class ZipLookupData
+        {
+            public double Lat { get; set; }
+            public double Lon { get; set; }
+            public string City { get; set; } = "";
+            public string State { get; set; } = "";
         }
 
         private string ConvertStateToAbbreviation(string stateName)
@@ -248,15 +314,7 @@ namespace SnowDayPredictor.Services
             return stateMap.TryGetValue(stateName, out var abbr) ? abbr : stateName;
         }
 
-        /// <summary>
-        /// Get coordinates from ZIP code (legacy method for compatibility)
-        /// </summary>
-        public async Task<(double lat, double lon)?> GetCoordinatesFromZip(string zipCode)
-        {
-            var result = await GetCoordinatesAndCityFromZip(zipCode);
-            return result.HasValue ? (result.Value.lat, result.Value.lon) : null;
-        }
-
+ 
         /// <summary>
         /// Get NWS forecast data for coordinates
         /// </summary>
@@ -843,36 +901,12 @@ namespace SnowDayPredictor.Services
             };
         }
 
-        /// <summary>
-        /// Get city name from ZIP code (for saving locations) with multiple fallbacks
-        /// </summary>
-        /// 
-        public record ZipLookupResponse(string zip, string city, string state);
-        public async Task<(string city, string state)> GetCityNameFromZip(string zipCode)
+       
+        // Add this helper class at the end of the WeatherService class (before the closing brace):
+        private class ZipLocationData
         {
-            try
-            {
-                var url = $"https://city-by-zip.ncs-cee.workers.dev/?zip={zipCode}";
-
-                var result = await _httpClient.GetFromJsonAsync<ZipLookupResponse>(url);
-
-                if (!string.IsNullOrWhiteSpace(result?.city) &&
-                    !string.IsNullOrWhiteSpace(result?.state))
-                {
-                    return (result.city, result.state);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"✗ ZIP proxy error: {ex.Message}");
-            }
-
-            // Fallbacks as before...
-            var stateFromZip = GetStateFromZipPrefix(zipCode);
-            if (!string.IsNullOrEmpty(stateFromZip))
-                return ($"ZIP {zipCode}", stateFromZip);
-
-            return ($"ZIP {zipCode}", "");
+            public string City { get; set; } = "";
+            public string State { get; set; } = "";
         }
 
         private string GetStateFromZipPrefix(string zipCode)
@@ -1032,13 +1066,47 @@ namespace SnowDayPredictor.Services
         }
 
         /// <summary>
-        /// Get recent weather data from Open-Meteo Historical API
+        /// Get recent weather data with localStorage caching (3-hour cache - historical data doesn't change frequently)
         /// </summary>
         public async Task<List<HistoricalWeatherDay>> GetRecentWeather(
             double latitude,
             double longitude,
             int daysBack)
         {
+            var cacheKey = $"{latitude:F2},{longitude:F2}_{daysBack}";
+
+            // Try to get from localStorage cache first (if JSRuntime is available)
+            if (_jsRuntime != null)
+            {
+                try
+                {
+                    var cachedJson = await _jsRuntime.InvokeAsync<string>("localStorage.getItem", $"{HistoricalWeatherCacheKey}_{cacheKey}");
+                    if (!string.IsNullOrEmpty(cachedJson))
+                    {
+                        var cached = System.Text.Json.JsonSerializer.Deserialize<CachedHistoricalWeather>(cachedJson);
+                        if (cached != null)
+                        {
+                            // Check if cache is still valid (3 hours)
+                            var cacheAge = DateTime.Now - cached.CachedAt;
+                            if (cacheAge.TotalHours < 3)
+                            {
+                                Console.WriteLine($"Using cached historical weather for {cacheKey} (age: {cacheAge.TotalMinutes:F0} min)");
+                                return cached.Data;
+                            }
+                            else
+                            {
+                                Console.WriteLine($"Historical weather cache expired for {cacheKey} (age: {cacheAge.TotalHours:F1} hours)");
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error reading historical weather cache: {ex.Message}");
+                }
+            }
+
+            // Not in cache or cache expired - fetch from API
             try
             {
                 var endDate = DateTime.Today.AddDays(-1); // Yesterday
@@ -1084,6 +1152,26 @@ namespace SnowDayPredictor.Services
                     historicalDays.Add(day);
                 }
 
+                // Cache the result in localStorage (3-hour cache)
+                if (_jsRuntime != null && historicalDays.Any())
+                {
+                    try
+                    {
+                        var cacheData = new CachedHistoricalWeather
+                        {
+                            Data = historicalDays,
+                            CachedAt = DateTime.Now
+                        };
+                        var json = System.Text.Json.JsonSerializer.Serialize(cacheData);
+                        await _jsRuntime.InvokeVoidAsync("localStorage.setItem", $"{HistoricalWeatherCacheKey}_{cacheKey}", json);
+                        Console.WriteLine($"Cached historical weather data for {cacheKey}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error caching historical weather: {ex.Message}");
+                    }
+                }
+
                 return historicalDays;
             }
             catch (Exception ex)
@@ -1092,6 +1180,14 @@ namespace SnowDayPredictor.Services
                 return new();
             }
         }
+
+        // Add this helper class at the end of the WeatherService class (before the closing brace):
+        private class CachedHistoricalWeather
+        {
+            public List<HistoricalWeatherDay> Data { get; set; } = new();
+            public DateTime CachedAt { get; set; }
+        }
+
 
         /// <summary>
         /// Get active alerts (public wrapper)
