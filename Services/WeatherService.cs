@@ -314,7 +314,7 @@ namespace SnowDayPredictor.Services
             return stateMap.TryGetValue(stateName, out var abbr) ? abbr : stateName;
         }
 
- 
+
         /// <summary>
         /// Get NWS forecast data for coordinates
         /// </summary>
@@ -478,10 +478,15 @@ namespace SnowDayPredictor.Services
                     period.ProbabilityOfPrecipitation?.Value ?? 0,
                     climate,
                     winterEvents,
-                    alerts
+                    alerts,
+                    period,
+                    nightPeriod
                 );
 
                 Console.WriteLine($"  Result: Closure={closureChance}%, Delay={delayChance}%{(isAftermath ? $" (aftermath, {daysSince}d since event)" : "")}");
+
+                // Get snow description for display (range or keyword)
+                var snowDescription = GetSnowDescription(period, nightPeriod);
 
                 forecasts.Add(new SnowDayForecast
                 {
@@ -492,7 +497,7 @@ namespace SnowDayPredictor.Services
                     Temperature = period.Temperature,
                     Forecast = period.ShortForecast,
                     PrecipitationChance = period.ProbabilityOfPrecipitation?.Value ?? 0,
-                    SnowfallAmount = snowAmount > 0 ? $"{snowAmount:F1}\"" : null,
+                    SnowfallAmount = !string.IsNullOrEmpty(snowDescription) ? snowDescription : null,
                     IsAftermathDay = isAftermath,
                     DaysSinceSnowEvent = daysSince
                 });
@@ -512,7 +517,9 @@ namespace SnowDayPredictor.Services
             int precipChance,
             GeographyContext climate,
             Dictionary<DateTime, WinterEvent> winterEvents,
-            List<WeatherAlert> alerts)
+            List<WeatherAlert> alerts,
+            Period period,
+            Period? nightPeriod)
         {
             // Check for aftermath from previous snow events FIRST
             var (aftermathClosure, aftermathDelay, days) = CalculateAftermathProbabilities(
@@ -522,24 +529,22 @@ namespace SnowDayPredictor.Services
                 winterEvents
             );
 
-            // Check if this is a direct snow day (significant accumulation)
-            // But only use direct calculation if it would be HIGHER than aftermath
-            if (snowAmount >= 1.0 || iceAmount >= 0.1)
-            {
-                var (directClosure, directDelay) = CalculateDirectSnowDayProbabilities(
-                    snowAmount,
-                    iceAmount,
-                    temperature,
-                    precipChance,
-                    climate,
-                    alerts
-                );
+            // Check direct probability (handles both explicit amounts AND keywords)
+            var (directClosure, directDelay) = CalculateDirectSnowDayProbabilities(
+                snowAmount,
+                iceAmount,
+                temperature,
+                precipChance,
+                climate,
+                alerts,
+                period,
+                nightPeriod
+            );
 
-                // Use whichever is higher (major snow day or aftermath)
-                if (directClosure > aftermathClosure)
-                {
-                    return (directClosure, directDelay, false, 0);
-                }
+            // Use whichever is higher (direct snow/keyword or aftermath)
+            if (directClosure > aftermathClosure)
+            {
+                return (directClosure, directDelay, false, 0);
             }
 
             // Return aftermath if it exists
@@ -553,7 +558,7 @@ namespace SnowDayPredictor.Services
         }
 
         /// <summary>
-        /// Calculate probabilities for a day with active snowfall
+        /// Calculate probabilities for a day with active snowfall OR keyword-based forecast
         /// </summary>
         private (int closureChance, int delayChance) CalculateDirectSnowDayProbabilities(
             double snowAmount,
@@ -561,72 +566,112 @@ namespace SnowDayPredictor.Services
             int temperature,
             int precipChance,
             GeographyContext climate,
-            List<WeatherAlert> alerts)
+            List<WeatherAlert> alerts,
+            Period period,
+            Period? nightPeriod)
         {
-            Console.WriteLine($"  Direct snow calc: snow={snowAmount}\", ice={iceAmount}\", temp={temperature}°F, precip={precipChance}%");
+            // If we have explicit amounts, use standard calculation
+            if (snowAmount > 0 || iceAmount > 0)
+            {
+                Console.WriteLine($"  Direct snow calc: snow={snowAmount}\", ice={iceAmount}\", temp={temperature}°F, precip={precipChance}%");
 
-            // Base calculation using climate-adjusted threshold
-            double threshold = climate.ClosureThresholdInches;
-            Console.WriteLine($"  Closure threshold: {threshold:F2}\"");
+                // Base calculation using climate-adjusted threshold
+                double threshold = climate.ClosureThresholdInches;
+                Console.WriteLine($"  Closure threshold: {threshold:F2}\"");
 
-            // Ice is more dangerous - amplify its effect
-            double effectiveSnow = snowAmount + (iceAmount * 3.0);
-            Console.WriteLine($"  Effective snow: {effectiveSnow:F2}\"");
+                // Ice is more dangerous - amplify its effect
+                double effectiveSnow = snowAmount + (iceAmount * 3.0);
+                Console.WriteLine($"  Effective snow: {effectiveSnow:F2}\"");
 
-            // Temperature factor: colder = more dangerous (black ice, harder to clear)
-            double tempFactor = 1.0;
-            if (temperature < 20) tempFactor = 1.3;
-            else if (temperature < 25) tempFactor = 1.15;
+                // Temperature factor: colder = more dangerous (black ice, harder to clear)
+                double tempFactor = 1.0;
+                if (temperature < 20) tempFactor = 1.3;
+                else if (temperature < 25) tempFactor = 1.15;
 
-            // Calculate raw probability
-            double rawProbability = (effectiveSnow * tempFactor) / threshold;
-            int baseClosureChance = (int)Math.Min(100, rawProbability * 100);
-            Console.WriteLine($"  Raw probability: {rawProbability:F2} -> {baseClosureChance}%");
+                // Calculate raw probability
+                double rawProbability = (effectiveSnow * tempFactor) / threshold;
+                int baseClosureChance = (int)Math.Min(100, rawProbability * 100);
+                Console.WriteLine($"  Raw probability: {rawProbability:F2} -> {baseClosureChance}%");
 
-            // Apply precipitation chance modifier
-            baseClosureChance = (int)(baseClosureChance * (precipChance / 100.0));
-            Console.WriteLine($"  After precip modifier ({precipChance}%): {baseClosureChance}%");
+                // Apply precipitation chance modifier
+                baseClosureChance = (int)(baseClosureChance * (precipChance / 100.0));
+                Console.WriteLine($"  After precip modifier ({precipChance}%): {baseClosureChance}%");
 
-            // Apply alert bonus
-            int alertBonus = GetAlertBonus(alerts);
-            int finalClosureChance = Math.Min(95, baseClosureChance + alertBonus);
-            Console.WriteLine($"  Alert bonus: +{alertBonus}% -> Final: {finalClosureChance}%");
+                // Apply alert bonus
+                int alertBonus = GetAlertBonus(alerts);
+                int finalClosureChance = Math.Min(95, baseClosureChance + alertBonus);
+                Console.WriteLine($"  Alert bonus: +{alertBonus}% -> Final: {finalClosureChance}%");
 
-            // Delay logic: inverse relationship with closure
+                // Delay logic
+                int delayChance = CalculateDelayFromClosure(finalClosureChance);
+                Console.WriteLine($"  Delay: {delayChance}%");
+
+                return (finalClosureChance, Math.Min(95, delayChance));
+            }
+
+            // NEW: Keyword-based fallback for vague forecasts (no explicit amounts)
+            var forecast = period.ShortForecast?.ToLower() ?? "";
+
+            // Determine base keyword probability
+            double baseKeyword = 0;
+
+            if (forecast.Contains("heavy snow"))
+                baseKeyword = 70;
+            else if (forecast.Contains("light snow") && !forecast.Contains("chance"))
+                baseKeyword = 25;
+            else if (forecast.Contains("chance") && forecast.Contains("snow") && !forecast.Contains("slight"))
+                baseKeyword = 15;
+            else if (forecast.Contains("slight chance") && forecast.Contains("snow"))
+                baseKeyword = 5;
+            else if (forecast.Contains("snow showers"))
+                baseKeyword = 10;
+
+            if (baseKeyword == 0)
+                return (0, 0);
+
+            // Apply preparedness adjustment (same logic as snow calculations)
+            double prepFactor = 1.0 + (climate.PreparednessIndex * 5.0);
+            double adjustedKeyword = baseKeyword / prepFactor;
+
+            // Apply precipitation probability
+            adjustedKeyword *= (precipChance / 100.0);
+
+            // Winter alert bonus
+            int keywordAlertBonus = GetAlertBonus(alerts);
+            if (keywordAlertBonus > 0)
+                adjustedKeyword = Math.Min(adjustedKeyword + 20, 95);
+
+            // Delays are 2.5x more likely than closures for vague forecasts
+            double keywordDelay = Math.Min(adjustedKeyword * 2.5, 85);
+
+            if (adjustedKeyword > 0)
+                Console.WriteLine($"  Keyword probability: '{forecast}' (prep-adjusted) → Closure={adjustedKeyword:F0}%, Delay={keywordDelay:F0}%");
+
+            return ((int)Math.Round(adjustedKeyword), (int)Math.Round(keywordDelay));
+        }
+
+        /// <summary>
+        /// Calculate delay probability based on closure probability
+        /// </summary>
+        private int CalculateDelayFromClosure(int closureChance)
+        {
             // High closure (80%+) → very low delay (10-20%)
             // Medium closure (40-80%) → moderate delay (30-50%)
             // Low closure (10-40%) → higher delay (40-70%)
             int delayChance = 0;
 
-            if (finalClosureChance >= 80)
-            {
-                // Nearly certain closure → minimal delay chance
-                delayChance = Math.Max(5, 20 - (finalClosureChance - 80));
-            }
-            else if (finalClosureChance >= 60)
-            {
-                // Likely closure → low delay chance
+            if (closureChance >= 80)
+                delayChance = Math.Max(5, 20 - (closureChance - 80));
+            else if (closureChance >= 60)
                 delayChance = 30;
-            }
-            else if (finalClosureChance >= 40)
-            {
-                // Uncertain → moderate delay
+            else if (closureChance >= 40)
                 delayChance = 50;
-            }
-            else if (finalClosureChance >= 20)
-            {
-                // Unlikely closure → higher delay
-                delayChance = Math.Min(75, 40 + finalClosureChance);
-            }
-            else if (finalClosureChance >= 5)
-            {
-                // Very unlikely closure → delay more likely
-                delayChance = Math.Min(60, finalClosureChance * 3);
-            }
+            else if (closureChance >= 20)
+                delayChance = Math.Min(75, 40 + closureChance);
+            else if (closureChance >= 5)
+                delayChance = Math.Min(60, closureChance * 3);
 
-            Console.WriteLine($"  Delay: {delayChance}%");
-
-            return (finalClosureChance, Math.Min(95, delayChance));
+            return delayChance;
         }
 
         // Add this class inside WeatherService (before CalculateSnowDayProbabilitiesWithHistory)
@@ -672,6 +717,54 @@ namespace SnowDayPredictor.Services
                 {
                     Console.WriteLine($"      Skipped: daysSince <= 0");
                     continue;
+                }
+
+                // SPECIAL: Snow events Day 5-6 can have delay-only aftermath (no closures)
+                if (!evt.IsIceEvent && daysSince >= 5 && daysSince <= 6)
+                {
+                    // Calculate delay-only for Day 5-6 (roads clear enough to open, but buses slower)
+                    double day56PrepFactor = 1.5 - climate.PreparednessIndex;
+                    double day56Threshold = climate.ClosureThresholdInches;
+                    double day56RawRatio = evt.EffectiveAmount / day56Threshold;
+
+                    // Only apply to major events (>2x threshold = significant storm)
+                    if (day56RawRatio >= 2.0)
+                    {
+                        double day56BaseProb;
+                        if (day56RawRatio >= 2.5) day56BaseProb = 98.0 * day56PrepFactor;
+                        else if (day56RawRatio >= 2.0) day56BaseProb = 95.0 * day56PrepFactor;
+                        else day56BaseProb = 70.0 * day56PrepFactor;
+
+                        day56BaseProb = Math.Min(100, day56BaseProb);
+
+                        // Day 5-6: Delays only (school open, buses slower)
+                        double day56DelayProb;
+                        if (daysSince == 5)
+                            day56DelayProb = Math.Min(day56BaseProb * 0.30, 30); // 30% of base, max 30%
+                        else // daysSince == 6
+                            day56DelayProb = Math.Min(day56BaseProb * 0.15, 15); // 15% of base, max 15%
+
+                        // Major storms (>6") extend longer
+                        if (evt.EffectiveAmount > 6.0)
+                            day56DelayProb = Math.Min(day56DelayProb * 1.2, 40);
+
+                        int day56DelayChance = (int)Math.Round(day56DelayProb);
+
+                        if (day56DelayChance > 0)
+                        {
+                            Console.WriteLine($"      SNOW Day {daysSince} delay-only: {day56DelayChance}%");
+
+                            if (day56DelayChance > maxDelayChance)
+                            {
+                                maxClosureChance = 0; // No closures on Day 5-6
+                                maxDelayChance = day56DelayChance;
+                                closestDays = daysSince;
+                                Console.WriteLine($"      *** NEW MAX (delay only) ***");
+                            }
+                        }
+                    }
+
+                    continue; // Skip normal aftermath logic for Day 5-6
                 }
 
                 if (daysSince > climate.TypicalClosureDays)
@@ -758,41 +851,60 @@ namespace SnowDayPredictor.Services
                 }
 
                 // Apply temperature melt factor (affects both ice and snow)
+                double closureProb = finalProb;
                 if (temperature > 32)
                 {
                     double meltFactor = climate.GetMeltFactor(temperature);
-                    double before = finalProb;
+                    double before = closureProb;
 
                     // Ice melts faster than snow, so melt factor is stronger for ice
                     double meltMultiplier = evt.IsIceEvent ? 0.7 : 0.5;
-                    finalProb *= (1.0 - meltFactor * meltMultiplier);
+                    closureProb *= (1.0 - meltFactor * meltMultiplier);
 
-                    Console.WriteLine($"      Temp {temperature}°F melt: {before:F1}% → {finalProb:F1}%");
+                    Console.WriteLine($"      Temp {temperature}°F melt: {before:F1}% → {closureProb:F1}%");
                 }
 
-                int closureChance = (int)Math.Round(finalProb);
+                int closureChance = (int)Math.Round(closureProb);
 
-                // Inverse delay relationship
+                // Calculate delay separately based on event type
                 int delayChance;
-                if (closureChance >= 85)
+                if (evt.IsIceEvent)
                 {
-                    delayChance = Math.Max(10, 20 - (closureChance - 85) / 2);
-                }
-                else if (closureChance >= 70)
-                {
-                    delayChance = 30;
-                }
-                else if (closureChance >= 50)
-                {
-                    delayChance = Math.Min(65, closureChance + 15);
-                }
-                else if (closureChance >= 25)
-                {
-                    delayChance = Math.Min(70, closureChance + 30);
+                    // Ice events: Use inverse delay relationship (existing logic)
+                    if (closureChance >= 85)
+                        delayChance = Math.Max(10, 20 - (closureChance - 85) / 2);
+                    else if (closureChance >= 70)
+                        delayChance = 30;
+                    else if (closureChance >= 50)
+                        delayChance = Math.Min(65, closureChance + 15);
+                    else if (closureChance >= 25)
+                        delayChance = Math.Min(70, closureChance + 30);
+                    else
+                        delayChance = Math.Min(50, closureChance * 2);
                 }
                 else
                 {
-                    delayChance = Math.Min(50, closureChance * 2);
+                    // SNOW events: Delays persist longer than closures
+                    // Based on closureProb (which has preparedness and melt already applied)
+                    double delayProb;
+                    if (daysSince == 1)
+                        delayProb = Math.Min(closureProb * 0.90, 85);
+                    else if (daysSince == 2)
+                        delayProb = Math.Min(closureProb * 0.85, 75);
+                    else if (daysSince == 3)
+                        delayProb = Math.Min(closureProb * 0.85, 65);
+                    else if (daysSince == 4)
+                        delayProb = Math.Min(closureProb * 3.0, 50);
+                    else if (daysSince == 5)
+                        delayProb = Math.Min(closureProb * 2.5, 30);
+                    else
+                        delayProb = Math.Min(closureProb * 2.0, 20);
+
+                    // Major storms (>6") have longer delay impact
+                    if (evt.EffectiveAmount > 6.0)
+                        delayProb = Math.Min(delayProb * 1.2, 95);
+
+                    delayChance = (int)Math.Round(delayProb);
                 }
 
                 Console.WriteLine($"      Final: Closure={closureChance}%, Delay={delayChance}%");
@@ -811,48 +923,52 @@ namespace SnowDayPredictor.Services
         }
 
         /// <summary>
-        /// Extract snow amount from day and night periods
+        /// Extract snow amount from day and night periods - EXPLICIT AMOUNTS ONLY
+        /// No keyword-based estimates (those are handled in direct probability calculation)
         /// </summary>
         private double ExtractSnowAmount(Period dayPeriod, Period? nightPeriod)
         {
             double total = 0;
 
+            // Try explicit NWS snowfall values
             if (dayPeriod.SnowfallAmount?.Value.HasValue == true)
-            {
                 total += dayPeriod.SnowfallAmount.Value.Value;
-                Console.WriteLine($"    Day period has {dayPeriod.SnowfallAmount.Value.Value}\" snow");
-            }
-
             if (nightPeriod?.SnowfallAmount?.Value.HasValue == true)
-            {
                 total += nightPeriod.SnowfallAmount.Value.Value;
-                Console.WriteLine($"    Night period has {nightPeriod.SnowfallAmount.Value.Value}\" snow");
-            }
 
-            // If NWS doesn't provide snowfall amounts, try to parse from DetailedForecast
-            if (total == 0)
+            if (total > 0)
             {
-                total = ParseSnowFromText(dayPeriod.DetailedForecast, dayPeriod.ShortForecast);
-                if (nightPeriod != null && total == 0)
-                {
-                    total = ParseSnowFromText(nightPeriod.DetailedForecast, nightPeriod.ShortForecast);
-                }
+                Console.WriteLine($"  Explicit snow from NWS: {total:F1}\"");
+                return total;
             }
 
-            return total;
+            // Try parsing explicit amounts from text (e.g., "6-10 inches possible")
+            var detailed = dayPeriod.DetailedForecast ?? "";
+            var nightDetailed = nightPeriod?.DetailedForecast ?? "";
+
+            total = ParseSnowFromText(detailed, dayPeriod.ShortForecast);
+            if (nightPeriod != null)
+                total += ParseSnowFromText(nightDetailed, nightPeriod.ShortForecast);
+
+            if (total > 0)
+                Console.WriteLine($"  Parsed from text: {total:F1}\"");
+
+            return total; // Returns 0 if no explicit amount found (keywords handled separately)
         }
 
         /// <summary>
         /// Parse snow amounts from forecast text when NWS doesn't provide structured data
+        /// Only parses EXPLICIT amounts like "6-10 inches" - NO keyword estimates
         /// </summary>
         private double ParseSnowFromText(string detailedForecast, string shortForecast)
         {
             var text = (detailedForecast + " " + shortForecast).ToLower();
 
-            // Look for patterns like "4 to 8 inches", "6 inches", "heavy snow"
+            // Look for patterns like "4 to 8 inches", "6 inches", etc.
             var patterns = new[]
             {
                 @"(\d+)\s*to\s*(\d+)\s*inch", // "4 to 8 inches"
+                @"(\d+)\s*-\s*(\d+)\s*inch",   // "4-8 inches"
                 @"around\s*(\d+)\s*inch",       // "around 6 inches"
                 @"(\d+)\s*inch",                // "6 inches"
             };
@@ -879,24 +995,57 @@ namespace SnowDayPredictor.Services
                 }
             }
 
-            // Qualitative estimates based on keywords
-            if (text.Contains("heavy snow"))
+            // NO keyword estimates - return 0 if no explicit amount found
+            // Keyword-based probabilities are handled separately in direct calculation
+            return 0;
+        }
+
+        /// <summary>
+        /// Get snow range for display (e.g., "7-11 inches")
+        /// </summary>
+        private (double min, double max)? GetSnowRange(Period dayPeriod, Period? nightPeriod)
+        {
+            var combined = (dayPeriod.DetailedForecast ?? "") + " " + (nightPeriod?.DetailedForecast ?? "");
+
+            // Match patterns like "6-10 inches" or "6 to 10 inches"
+            var rangeMatch = System.Text.RegularExpressions.Regex.Match(combined, @"(\d+)\s*(?:to|-)\s*(\d+)\s*inch", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (rangeMatch.Success)
+                return (double.Parse(rangeMatch.Groups[1].Value), double.Parse(rangeMatch.Groups[2].Value));
+
+            // Match single amount like "8 inches"
+            var singleMatch = System.Text.RegularExpressions.Regex.Match(combined, @"(\d+)\s*inch", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (singleMatch.Success)
             {
-                Console.WriteLine($"    Estimated from 'heavy snow': 6\"");
-                return 6.0;
-            }
-            else if (text.Contains("moderate snow") || text.Contains("snow likely"))
-            {
-                Console.WriteLine($"    Estimated from 'moderate snow': 3\"");
-                return 3.0;
-            }
-            else if (text.Contains("light snow") || text.Contains("chance snow"))
-            {
-                Console.WriteLine($"    Estimated from 'light snow': 1\"");
-                return 1.0;
+                double val = double.Parse(singleMatch.Groups[1].Value);
+                return (val, val);
             }
 
-            return 0;
+            return null;
+        }
+
+        /// <summary>
+        /// Get display-friendly snow description for UI
+        /// </summary>
+        private string GetSnowDescription(Period dayPeriod, Period? nightPeriod)
+        {
+            // Show range if available (e.g., "7-11\" snow")
+            var range = GetSnowRange(dayPeriod, nightPeriod);
+            if (range.HasValue)
+            {
+                return range.Value.min == range.Value.max
+                    ? $"{range.Value.min:F0}\" snow"
+                    : $"{range.Value.min:F0}-{range.Value.max:F0}\" snow";
+            }
+
+            // Otherwise show forecast term
+            var forecast = (dayPeriod.ShortForecast ?? "").ToLower();
+
+            if (forecast.Contains("heavy snow")) return "Heavy snow";
+            if (forecast.Contains("light snow")) return "Light snow";
+            if (forecast.Contains("snow showers")) return "Snow showers";
+            if (forecast.Contains("snow")) return "Snow";
+
+            return "";
         }
 
         /// <summary>
@@ -1080,7 +1229,7 @@ namespace SnowDayPredictor.Services
             };
         }
 
-       
+
         // Add this helper class at the end of the WeatherService class (before the closing brace):
         private class ZipLocationData
         {
