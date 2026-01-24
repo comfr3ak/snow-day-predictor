@@ -428,11 +428,11 @@ namespace SnowDayPredictor.Services
 
                 // Track significant winter events (snow OR ice)
                 // Ice is 3x more impactful, so even small amounts matter
-                if (snowAmount >= 1.0 || iceAmount >= 0.1)
+                if (snowAmount >= 1.0 || iceAmount >= 0.05)
                 {
                     // Store as effective snow (ice × 3 for impact)
                     double effectiveAmount = snowAmount + (iceAmount * 3.0);
-                    bool isIceEvent = iceAmount >= 0.1;  // Primarily ice if we detected ice
+                    bool isIceEvent = iceAmount >= 0.05;  // Primarily ice if we detected ice
 
                     winterEvents[period.StartTime.Date] = new WinterEvent
                     {
@@ -950,7 +950,7 @@ namespace SnowDayPredictor.Services
             var temp = period.Temperature;
 
             // RULE 1: Must be at or below freezing
-            if (temp > 32)
+            if (temp >= 38)
                 return 0;
 
             // RULE 2: Check if NWS explicitly says NO ice accumulation
