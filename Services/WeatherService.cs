@@ -841,21 +841,29 @@ namespace SnowDayPredictor.Services
             return total;
         }
 
+
         /// <summary>
-        /// Get active winter weather alerts for location
+        /// Get active weather alerts - NO CACHING, always fresh API call
         /// </summary>
         public async Task<List<WeatherAlert>> GetActiveAlertsAsync(double latitude, double longitude)
         {
             try
             {
+                // LOG: Prove we're making a fresh API call
+                Console.WriteLine($"🚨 FETCHING FRESH ALERTS from NWS for {latitude:F4},{longitude:F4} at {DateTime.Now:HH:mm:ss}");
+
                 var url = $"https://api.weather.gov/alerts/active?point={latitude:F4},{longitude:F4}";
                 var response = await _httpClient.GetFromJsonAsync<NWSAlertsResponse>(url);
 
-                if (response?.Features == null) return new List<WeatherAlert>();
+                if (response?.Features == null)
+                {
+                    Console.WriteLine($"✅ No active alerts found");
+                    return new List<WeatherAlert>();
+                }
 
                 var winterKeywords = new[] { "winter", "snow", "ice", "blizzard", "freezing" };
 
-                return response.Features
+                var alerts = response.Features
                     .Where(f => winterKeywords.Any(k =>
                         f.Properties.Event.Contains(k, StringComparison.OrdinalIgnoreCase)))
                     .Select(f => new WeatherAlert
@@ -869,9 +877,13 @@ namespace SnowDayPredictor.Services
                         Ends = f.Properties.Ends
                     })
                     .ToList();
+
+                Console.WriteLine($"✅ FRESH ALERTS RECEIVED: {alerts.Count} winter-related alerts");
+                return alerts;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine($"❌ Alert fetch failed: {ex.Message}");
                 return new List<WeatherAlert>();
             }
         }
@@ -987,12 +999,15 @@ namespace SnowDayPredictor.Services
         }
 
         /// <summary>
-        /// Get weather forecast (alternative method signature for compatibility)
+        /// Get weather forecast from NWS - NO CACHING, always fresh API call
         /// </summary>
         public async Task<(List<Period>? periods, string city, string state)> GetWeatherForecast(double latitude, double longitude)
         {
             try
             {
+                // LOG: Prove we're making a fresh API call
+                Console.WriteLine($"🔄 FETCHING FRESH FORECAST from NWS for {latitude:F4},{longitude:F4} at {DateTime.Now:HH:mm:ss}");
+
                 // Get NWS points data
                 var pointsUrl = $"https://api.weather.gov/points/{latitude:F4},{longitude:F4}";
                 var pointsResponse = await _httpClient.GetFromJsonAsync<NWSPointsResponse>(pointsUrl);
@@ -1007,6 +1022,7 @@ namespace SnowDayPredictor.Services
 
                 // Get forecast
                 var forecastUrl = pointsResponse.Properties.Forecast;
+                Console.WriteLine($"🔄 Fetching forecast data from: {forecastUrl}");
                 var forecastResponse = await _httpClient.GetFromJsonAsync<NWSForecastResponse>(forecastUrl);
 
                 if (forecastResponse?.Properties?.Periods == null)
@@ -1014,14 +1030,16 @@ namespace SnowDayPredictor.Services
                     return (null, city, state);
                 }
 
+                Console.WriteLine($"✅ FRESH FORECAST RECEIVED: {forecastResponse.Properties.Periods.Count} periods");
                 return (forecastResponse.Properties.Periods, city, state);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Weather forecast fetch failed: {ex.Message}");
+                Console.WriteLine($"❌ Weather forecast fetch failed: {ex.Message}");
                 return (null, "", "");
             }
         }
+
 
         /// <summary>
         /// Calculate snow day chances with automatic climate data fetching
