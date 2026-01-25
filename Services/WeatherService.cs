@@ -932,8 +932,18 @@ namespace SnowDayPredictor.Services
                     double meltFactor = climate.GetMeltFactor(temperature);
                     double before = closureProb;
 
-                    // Ice melts faster than snow, so melt factor is stronger for ice
-                    double meltMultiplier = evt.IsIceEvent ? 0.7 : 0.5;
+                    // Snow melts FASTER than ice - ice persists on roads longer
+                    // At warm temps (>40°F), snow is basically gone by next morning
+                    double meltMultiplier;
+                    if (evt.IsIceEvent)
+                    {
+                        meltMultiplier = 0.5;  // Ice is stubborn, melts slower
+                    }
+                    else
+                    {
+                        // Snow melts fast, especially at warm temps
+                        meltMultiplier = temperature > 40 ? 0.9 : 0.7;
+                    }
                     closureProb *= (1.0 - meltFactor * meltMultiplier);
 
                     Console.WriteLine($"      Temp {temperature}°F melt: {before:F1}% → {closureProb:F1}%");
