@@ -471,24 +471,28 @@ namespace SnowDayPredictor.Services
                 }
             }
 
-            // ALERT-BASED SYNTHETIC EVENT: For low-prep areas with active alert but no detected events
+            // ALERT-BASED SYNTHETIC EVENTS: For low-prep areas with alerts but no detected events
             // This ensures aftermath carries forward even when forecast has updated past the event
+            // Check today AND past 5 days for alerts (historical alerts from IEM)
             if (climate.PreparednessIndex < 0.3)
             {
-                var today = DateTime.Today;
-                int alertBonus = GetAlertBonusForDate(alerts, today);
-                if (alertBonus > 0 && !winterEvents.ContainsKey(today))
+                for (int daysAgo = 0; daysAgo <= 5; daysAgo++)
                 {
-                    // Create synthetic ice event based on alert - assume light ice (typical for these alerts)
-                    double syntheticIce = 0.08; // ~0.08" ice = significant for low-prep area
-                    double effectiveAmount = syntheticIce * 3.0; // Ice multiplier
-                    winterEvents[today] = new WinterEvent
+                    var checkDate = DateTime.Today.AddDays(-daysAgo);
+                    int alertBonus = GetAlertBonusForDate(alerts, checkDate);
+                    if (alertBonus > 0 && !winterEvents.ContainsKey(checkDate))
                     {
-                        EffectiveAmount = effectiveAmount,
-                        IsIceEvent = true,
-                        OriginalIceAmount = syntheticIce
-                    };
-                    Console.WriteLine($"ALERT-BASED SYNTHETIC EVENT: {today:MM/dd} - Created ~{syntheticIce:F2}\" ice event from active alert (low-prep area)");
+                        // Create synthetic ice event based on alert - assume light ice (typical for these alerts)
+                        double syntheticIce = 0.08; // ~0.08" ice = significant for low-prep area
+                        double effectiveAmount = syntheticIce * 3.0; // Ice multiplier
+                        winterEvents[checkDate] = new WinterEvent
+                        {
+                            EffectiveAmount = effectiveAmount,
+                            IsIceEvent = true,
+                            OriginalIceAmount = syntheticIce
+                        };
+                        Console.WriteLine($"ALERT-BASED SYNTHETIC EVENT: {checkDate:MM/dd} - Created ~{syntheticIce:F2}\" ice event from alert (low-prep area, {daysAgo}d ago)");
+                    }
                 }
             }
 
@@ -1388,6 +1392,108 @@ namespace SnowDayPredictor.Services
             return AlertSeverity.None;
         }
 
+        /// <summary>
+        /// Fetch historical winter weather alerts from Iowa Environmental Mesonet (IEM)
+        /// Used when NWS active alerts have expired but we need to know if there was a recent winter event
+        /// </summary>
+        public async Task<List<WeatherAlert>> GetHistoricalAlertsAsync(string wfo, int daysBack = 5)
+        {
+            if (string.IsNullOrEmpty(wfo))
+            {
+                Console.WriteLine("⚠️ No WFO code provided for historical alerts");
+                return new List<WeatherAlert>();
+            }
+
+            try
+            {
+                var endDate = DateTime.Today;
+                var startDate = endDate.AddDays(-daysBack);
+
+                // IEM API for historical alerts - no custom headers to avoid CORS issues
+                var url = $"https://mesonet.agron.iastate.edu/cgi-bin/request/gis/watchwarn.py?" +
+                          $"year1={startDate.Year}&month1={startDate.Month}&day1={startDate.Day}&" +
+                          $"year2={endDate.Year}&month2={endDate.Month}&day2={endDate.Day}&" +
+                          $"wfo={wfo}&" +
+                          $"phenomena=WS&phenomena=WW&phenomena=BZ&phenomena=IS&phenomena=ZR&" +  // Winter Storm, Winter Weather, Blizzard, Ice Storm, Freezing Rain
+                          $"significance=W&significance=A&" +  // Warning, Advisory
+                          $"fmt=geojson";
+
+                Console.WriteLine($"📜 FETCHING HISTORICAL ALERTS from IEM for WFO {wfo} ({startDate:MM/dd}-{endDate:MM/dd})");
+
+                var response = await _httpClient.GetFromJsonAsync<IEMAlertResponse>(url);
+
+                if (response?.Features == null || !response.Features.Any())
+                {
+                    Console.WriteLine($"✅ No historical winter alerts found for WFO {wfo}");
+                    return new List<WeatherAlert>();
+                }
+
+                var alerts = response.Features
+                    .Select(f => new WeatherAlert
+                    {
+                        Type = ConvertIEMPhenomenaToEventType(f.Properties.Phenomena, f.Properties.Significance),
+                        Headline = $"Historical: {ConvertIEMPhenomenaToEventType(f.Properties.Phenomena, f.Properties.Significance)}",
+                        Description = $"WFO: {f.Properties.Wfo}",
+                        Severity = ConvertIEMToSeverity(f.Properties.Phenomena, f.Properties.Significance),
+                        Onset = f.Properties.Issue ?? f.Properties.ProductIssue,
+                        Expires = f.Properties.Expire,
+                        Ends = f.Properties.Expire
+                    })
+                    .ToList();
+
+                Console.WriteLine($"✅ HISTORICAL ALERTS: Found {alerts.Count} winter alerts in past {daysBack} days");
+                foreach (var alert in alerts.Take(5))  // Log first 5
+                {
+                    Console.WriteLine($"   - {alert.Type}: {alert.Onset:MM/dd} to {alert.Expires:MM/dd}");
+                }
+
+                return alerts;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Historical alerts fetch failed: {ex.Message}");
+                return new List<WeatherAlert>();
+            }
+        }
+
+        private string ConvertIEMPhenomenaToEventType(string phenomena, string significance)
+        {
+            var type = phenomena switch
+            {
+                "WS" => "Winter Storm",
+                "WW" => "Winter Weather",
+                "BZ" => "Blizzard",
+                "IS" => "Ice Storm",
+                "ZR" => "Freezing Rain",
+                _ => "Winter Weather"
+            };
+
+            var level = significance switch
+            {
+                "W" => "Warning",
+                "A" => "Advisory",
+                "Y" => "Advisory",
+                _ => "Advisory"
+            };
+
+            return $"{type} {level}";
+        }
+
+        private AlertSeverity ConvertIEMToSeverity(string phenomena, string significance)
+        {
+            // Ice Storm and Blizzard are always extreme
+            if (phenomena == "IS" || phenomena == "BZ") return AlertSeverity.Extreme;
+
+            // Otherwise based on significance
+            return significance switch
+            {
+                "W" => AlertSeverity.Warning,
+                "A" => AlertSeverity.Advisory,
+                "Y" => AlertSeverity.Advisory,
+                _ => AlertSeverity.Advisory
+            };
+        }
+
         private int GetAlertBonus(List<WeatherAlert> alerts)
         {
             if (!alerts.Any()) return 0;
@@ -1531,7 +1637,7 @@ namespace SnowDayPredictor.Services
         /// <summary>
         /// Get weather forecast from NWS - NO CACHING, always fresh API call
         /// </summary>
-        public async Task<(List<Period>? periods, string city, string state)> GetWeatherForecast(double latitude, double longitude)
+        public async Task<(List<Period>? periods, string city, string state, string wfo)> GetWeatherForecast(double latitude, double longitude)
         {
             try
             {
@@ -1544,11 +1650,12 @@ namespace SnowDayPredictor.Services
 
                 if (pointsResponse?.Properties == null)
                 {
-                    return (null, "", "");
+                    return (null, "", "", "");
                 }
 
                 var city = pointsResponse.Properties.RelativeLocation?.Properties?.City ?? "Unknown";
                 var state = pointsResponse.Properties.RelativeLocation?.Properties?.State ?? "";
+                var wfo = pointsResponse.Properties.Cwa ?? "";  // Weather Forecast Office code
 
                 // Get forecast
                 var forecastUrl = pointsResponse.Properties.Forecast;
@@ -1557,16 +1664,16 @@ namespace SnowDayPredictor.Services
 
                 if (forecastResponse?.Properties?.Periods == null)
                 {
-                    return (null, city, state);
+                    return (null, city, state, wfo);
                 }
 
                 Console.WriteLine($"✅ FRESH FORECAST RECEIVED: {forecastResponse.Properties.Periods.Count} periods");
-                return (forecastResponse.Properties.Periods, city, state);
+                return (forecastResponse.Properties.Periods, city, state, wfo);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"❌ Weather forecast fetch failed: {ex.Message}");
-                return (null, "", "");
+                return (null, "", "", "");
             }
         }
 
