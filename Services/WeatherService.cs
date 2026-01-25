@@ -473,13 +473,21 @@ namespace SnowDayPredictor.Services
 
             // ALERT-BASED SYNTHETIC EVENTS: For low-prep areas with alerts but no detected events
             // This ensures aftermath carries forward even when forecast has updated past the event
-            // Check today AND past 5 days for alerts (historical alerts from IEM)
+            // IMPORTANT: For PAST days, only use HISTORICAL alerts (from IEM) - not current active alerts
+            // Current active alerts only apply to TODAY and forward
             if (climate.PreparednessIndex < 0.3)
             {
                 for (int daysAgo = 0; daysAgo <= 5; daysAgo++)
                 {
                     var checkDate = DateTime.Today.AddDays(-daysAgo);
-                    int alertBonus = GetAlertBonusForDate(alerts, checkDate);
+
+                    // For past days, only check HISTORICAL alerts (marked with "Historical:" headline)
+                    // For today, any alert can apply
+                    var alertsToCheck = daysAgo > 0
+                        ? alerts.Where(a => a.Headline.StartsWith("Historical:")).ToList()
+                        : alerts;
+
+                    int alertBonus = GetAlertBonusForDate(alertsToCheck, checkDate);
                     if (alertBonus > 0 && !winterEvents.ContainsKey(checkDate))
                     {
                         // Create synthetic ice event based on alert - assume light ice (typical for these alerts)
@@ -491,7 +499,7 @@ namespace SnowDayPredictor.Services
                             IsIceEvent = true,
                             OriginalIceAmount = syntheticIce
                         };
-                        Console.WriteLine($"ALERT-BASED SYNTHETIC EVENT: {checkDate:MM/dd} - Created ~{syntheticIce:F2}\" ice event from alert (low-prep area, {daysAgo}d ago)");
+                        Console.WriteLine($"ALERT-BASED SYNTHETIC EVENT: {checkDate:MM/dd} - Created ~{syntheticIce:F2}\" ice event from HISTORICAL alert (low-prep area, {daysAgo}d ago)");
                     }
                 }
             }
