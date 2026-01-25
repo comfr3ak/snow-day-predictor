@@ -979,7 +979,25 @@ namespace SnowDayPredictor.Services
             }
             else if (alertBonus > 0 && maxClosureChance == 0 && maxDelayChance == 0)
             {
-                Console.WriteLine($"    Alert active for {currentDate:MM/dd} (+{alertBonus}% potential) but no aftermath events");
+                // Alert is active but no winter events detected (forecast may have updated past the event)
+                // For low-prep areas, the alert itself is strong evidence of school closures
+                if (climate.PreparednessIndex < 0.3)
+                {
+                    // Low-prep areas: Alert alone warrants significant closure probability
+                    // These areas close preemptively for any winter weather - NWS doesn't issue alerts lightly
+                    double alertOnlyClosure = 80 * (1.0 - climate.PreparednessIndex);
+                    // At prep 0.08: 80 * 0.92 = 73.6%
+                    // At prep 0.15: 80 * 0.85 = 68%
+                    // At prep 0.25: 80 * 0.75 = 60%
+                    maxClosureChance = (int)Math.Round(alertOnlyClosure);
+                    maxDelayChance = Math.Min(60, maxClosureChance / 2 + 25);
+                    Console.WriteLine($"    Alert-only boost for low-prep area (prep={climate.PreparednessIndex:F2}): Closure={maxClosureChance}%, Delay={maxDelayChance}%");
+                }
+                else
+                {
+                    // Higher-prep areas: Alert alone isn't enough, need actual snow/ice detection
+                    Console.WriteLine($"    Alert active for {currentDate:MM/dd} (+{alertBonus}% potential) but no aftermath events");
+                }
             }
             else if (GetAlertBonus(alerts) > 0 && alertBonus == 0)
             {
@@ -1218,13 +1236,20 @@ namespace SnowDayPredictor.Services
             var precipChance = period.ProbabilityOfPrecipitation?.Value ?? 0;
             var temp = period.Temperature;
 
-            // RULE 1: Must be at or below freezing
-            if (temp >= 38)
+            // Check for EXPLICIT ice keywords in forecast - NWS knows when freezing rain is occurring
+            bool hasFreezingRain = forecast.Contains("freezing rain");
+            bool hasIceStorm = forecast.Contains("ice storm");
+            bool hasFreezingDrizzle = forecast.Contains("freezing drizzle");
+            bool hasSleet = forecast.Contains("sleet") || forecast.Contains("ice pellets");
+            bool hasExplicitIce = hasFreezingRain || hasIceStorm || hasFreezingDrizzle || hasSleet;
+
+            // RULE 1: Temperature check - BUT trust NWS if they explicitly forecast ice
+            // Freezing rain occurs during colder overnight/morning hours even when daytime high is above freezing
+            if (temp >= 38 && !hasExplicitIce)
                 return 0;
 
             // RULE 2: Check for sleet FIRST (ice pellets) - bypass "no accumulation" check
             // Sleet creates icy roads even without traditional ice accumulation
-            bool hasSleet = forecast.Contains("sleet") || forecast.Contains("ice pellets");
             if (hasSleet)
             {
                 double sleetIce = 0.08 * (precipChance / 100.0);
@@ -1241,13 +1266,10 @@ namespace SnowDayPredictor.Services
             }
 
             // RULE 4: Must explicitly mention ICE ACCUMULATION terms in PRIMARY forecast
-            bool hasFreezingRain = forecast.Contains("freezing rain");
-            bool hasIceStorm = forecast.Contains("ice storm");
             bool hasGlaze = forecast.Contains("glaze") || forecast.Contains("glazing");
-            bool hasFreezingDrizzle = forecast.Contains("freezing drizzle");
 
             // If none of these specific ice terms are in the SHORT forecast, return 0
-            if (!hasFreezingRain && !hasIceStorm && !hasGlaze && !hasFreezingDrizzle)
+            if (!hasFreezingRain && !hasIceStorm && !hasGlaze && !hasFreezingDrizzle && !hasSleet)
             {
                 return 0; // No phantom ice!
             }
