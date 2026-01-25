@@ -936,20 +936,24 @@ namespace SnowDayPredictor.Services
                 }
             }
 
-            // Apply alert bonus to aftermath (active alerts indicate ongoing dangerous conditions)
-            int alertBonus = GetAlertBonus(alerts);
+            // Apply alert bonus to aftermath ONLY if alerts are still active for this date
+            int alertBonus = GetAlertBonusForDate(alerts, currentDate);
             if (alertBonus > 0 && (maxClosureChance > 0 || maxDelayChance > 0))
             {
-                // Alerts significantly boost aftermath - roads may still be dangerous
+                // Alerts boost aftermath - but only when alert covers this day
                 int boostedClosure = Math.Min(95, maxClosureChance + alertBonus / 2);
                 int boostedDelay = Math.Min(95, maxDelayChance + alertBonus / 2);
                 Console.WriteLine($"    Alert bonus (+{alertBonus / 2}%): Closure={maxClosureChance}%→{boostedClosure}%, Delay={maxDelayChance}%→{boostedDelay}%");
                 maxClosureChance = boostedClosure;
                 maxDelayChance = boostedDelay;
             }
-            else if (alertBonus > 0)
+            else if (alertBonus > 0 && maxClosureChance == 0 && maxDelayChance == 0)
             {
-                Console.WriteLine($"    Alert active (+{alertBonus}% potential) but no aftermath events found");
+                Console.WriteLine($"    Alert active for {currentDate:MM/dd} (+{alertBonus}% potential) but no aftermath events");
+            }
+            else if (GetAlertBonus(alerts) > 0 && alertBonus == 0)
+            {
+                Console.WriteLine($"    Alerts exist but expired before {currentDate:MM/dd}");
             }
 
             Console.WriteLine($"    Aftermath result: Closure={maxClosureChance}%, Delay={maxDelayChance}%");
@@ -1310,6 +1314,46 @@ namespace SnowDayPredictor.Services
                 AlertSeverity.Warning => 40,   // Winter Storm Warning
                 AlertSeverity.Watch => 25,     // Winter Storm Watch
                 AlertSeverity.Advisory => 15,  // Winter Weather Advisory
+                _ => 0
+            };
+        }
+
+        /// <summary>
+        /// Get alert bonus only if alerts are active for a specific date
+        /// Alerts have Onset/Expires/Ends - only apply bonus if date falls within alert period
+        /// </summary>
+        private int GetAlertBonusForDate(List<WeatherAlert> alerts, DateTime date)
+        {
+            if (!alerts.Any()) return 0;
+
+            // Filter to alerts that are active for this date
+            var activeAlerts = alerts.Where(a =>
+            {
+                // Use Ends if available, otherwise Expires
+                var endDate = a.Ends ?? a.Expires;
+
+                // If no end date, assume alert is for today/tomorrow only
+                if (!endDate.HasValue)
+                    return date.Date <= DateTime.Today.AddDays(1);
+
+                // Alert is active if date is before the end date
+                // (Onset is typically in the past or today)
+                return date.Date <= endDate.Value.Date;
+            }).ToList();
+
+            if (!activeAlerts.Any())
+            {
+                Console.WriteLine($"    No alerts active for {date:MM/dd} (alerts expired)");
+                return 0;
+            }
+
+            var maxSeverity = activeAlerts.Max(a => a.Severity);
+            return maxSeverity switch
+            {
+                AlertSeverity.Extreme => 60,
+                AlertSeverity.Warning => 40,
+                AlertSeverity.Watch => 25,
+                AlertSeverity.Advisory => 15,
                 _ => 0
             };
         }
