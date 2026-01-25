@@ -487,7 +487,7 @@ namespace SnowDayPredictor.Services
                         ? alerts.Where(a => a.Headline.StartsWith("Historical:")).ToList()
                         : alerts;
 
-                    int alertBonus = GetAlertBonusForDate(alertsToCheck, checkDate);
+                    int alertBonus = GetAlertBonusForDate(alertsToCheck, checkDate, climate.PreparednessIndex);
                     if (alertBonus > 0 && !winterEvents.ContainsKey(checkDate))
                     {
                         // Create synthetic ice event based on alert - assume light ice (typical for these alerts)
@@ -651,10 +651,10 @@ namespace SnowDayPredictor.Services
                 baseClosureChance = (int)(baseClosureChance * (precipChance / 100.0));
                 Console.WriteLine($"  After precip modifier ({precipChance}%): {baseClosureChance}%");
 
-                // Apply alert bonus
-                int alertBonus = GetAlertBonus(alerts);
+                // Apply alert bonus (scaled by preparedness)
+                int alertBonus = GetAlertBonus(alerts, climate.PreparednessIndex);
                 int finalClosureChance = Math.Min(95, baseClosureChance + alertBonus);
-                Console.WriteLine($"  Alert bonus: +{alertBonus}% -> Final: {finalClosureChance}%");
+                Console.WriteLine($"  Alert bonus: +{alertBonus}% (prep-scaled) -> Final: {finalClosureChance}%");
 
                 // Delay logic
                 int delayChance = CalculateDelayFromClosure(finalClosureChance);
@@ -690,10 +690,10 @@ namespace SnowDayPredictor.Services
             // Apply precipitation probability
             adjustedKeyword *= (precipChance / 100.0);
 
-            // Winter alert bonus
-            int keywordAlertBonus = GetAlertBonus(alerts);
+            // Winter alert bonus (scaled by preparedness)
+            int keywordAlertBonus = GetAlertBonus(alerts, climate.PreparednessIndex);
             if (keywordAlertBonus > 0)
-                adjustedKeyword = Math.Min(adjustedKeyword + 20, 95);
+                adjustedKeyword = Math.Min(adjustedKeyword + keywordAlertBonus / 2, 95);
 
             // Delays are 2.5x more likely than closures for vague forecasts
             double keywordDelay = Math.Min(adjustedKeyword * 2.5, 85);
@@ -1011,8 +1011,8 @@ namespace SnowDayPredictor.Services
                 }
             }
 
-            // Apply alert bonus to aftermath ONLY if alerts are still active for this date
-            int alertBonus = GetAlertBonusForDate(alerts, currentDate);
+            // Apply alert bonus to aftermath ONLY if alerts are still active for this date (scaled by prep)
+            int alertBonus = GetAlertBonusForDate(alerts, currentDate, climate.PreparednessIndex);
             if (alertBonus > 0 && (maxClosureChance > 0 || maxDelayChance > 0))
             {
                 // Alerts boost aftermath - but only when alert covers this day
@@ -1044,7 +1044,7 @@ namespace SnowDayPredictor.Services
                     Console.WriteLine($"    Alert active for {currentDate:MM/dd} (+{alertBonus}% potential) but no aftermath events");
                 }
             }
-            else if (GetAlertBonus(alerts) > 0 && alertBonus == 0)
+            else if (GetAlertBonus(alerts, climate.PreparednessIndex) > 0 && alertBonus == 0)
             {
                 Console.WriteLine($"    Alerts exist but expired before {currentDate:MM/dd}");
             }
@@ -1577,12 +1577,12 @@ namespace SnowDayPredictor.Services
             };
         }
 
-        private int GetAlertBonus(List<WeatherAlert> alerts)
+        private int GetAlertBonus(List<WeatherAlert> alerts, double preparedness = 0.5)
         {
             if (!alerts.Any()) return 0;
 
             var maxSeverity = alerts.Max(a => a.Severity);
-            return maxSeverity switch
+            int rawBonus = maxSeverity switch
             {
                 AlertSeverity.Extreme => 60,   // Blizzard/Ice Storm
                 AlertSeverity.Warning => 40,   // Winter Storm Warning
@@ -1590,13 +1590,20 @@ namespace SnowDayPredictor.Services
                 AlertSeverity.Advisory => 15,  // Winter Weather Advisory
                 _ => 0
             };
+
+            // Scale alert bonus by preparedness - highly prepared areas aren't as impacted
+            // Low prep (0.08): ~94% of bonus (alerts very impactful)
+            // Mid prep (0.50): ~65% of bonus
+            // High prep (0.95): ~34% of bonus (they can handle it)
+            double scaleFactor = 1.0 - (preparedness * 0.7);
+            return (int)Math.Round(rawBonus * scaleFactor);
         }
 
         /// <summary>
         /// Get alert bonus only if alerts are active for a specific date
         /// Alerts have Onset/Expires/Ends - only apply bonus if date falls within alert period
         /// </summary>
-        private int GetAlertBonusForDate(List<WeatherAlert> alerts, DateTime date)
+        private int GetAlertBonusForDate(List<WeatherAlert> alerts, DateTime date, double preparedness = 0.5)
         {
             if (!alerts.Any()) return 0;
 
@@ -1622,7 +1629,7 @@ namespace SnowDayPredictor.Services
             }
 
             var maxSeverity = activeAlerts.Max(a => a.Severity);
-            return maxSeverity switch
+            int rawBonus = maxSeverity switch
             {
                 AlertSeverity.Extreme => 60,
                 AlertSeverity.Warning => 40,
@@ -1630,6 +1637,10 @@ namespace SnowDayPredictor.Services
                 AlertSeverity.Advisory => 15,
                 _ => 0
             };
+
+            // Scale by preparedness (same as GetAlertBonus)
+            double scaleFactor = 1.0 - (preparedness * 0.7);
+            return (int)Math.Round(rawBonus * scaleFactor);
         }
 
 
