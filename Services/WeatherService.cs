@@ -1211,7 +1211,17 @@ namespace SnowDayPredictor.Services
             if (temp >= 38)
                 return 0;
 
-            // RULE 2: Check if NWS explicitly says NO ice accumulation
+            // RULE 2: Check for sleet FIRST (ice pellets) - bypass "no accumulation" check
+            // Sleet creates icy roads even without traditional ice accumulation
+            bool hasSleet = forecast.Contains("sleet") || forecast.Contains("ice pellets");
+            if (hasSleet)
+            {
+                double sleetIce = 0.08 * (precipChance / 100.0);
+                Console.WriteLine($"  DEBUG: Sleet detected - estimating {sleetIce:F2}\" ice equivalent");
+                return sleetIce;
+            }
+
+            // RULE 3: Check if NWS explicitly says NO ice accumulation
             if (detailed.Contains("little or no ice accumulation") ||
                 detailed.Contains("no ice accumulation expected"))
             {
@@ -1219,8 +1229,7 @@ namespace SnowDayPredictor.Services
                 return 0;
             }
 
-            // RULE 3: Must explicitly mention ICE ACCUMULATION terms in PRIMARY forecast
-            // Only check SHORT forecast for primary precipitation type
+            // RULE 4: Must explicitly mention ICE ACCUMULATION terms in PRIMARY forecast
             bool hasFreezingRain = forecast.Contains("freezing rain");
             bool hasIceStorm = forecast.Contains("ice storm");
             bool hasGlaze = forecast.Contains("glaze") || forecast.Contains("glazing");
