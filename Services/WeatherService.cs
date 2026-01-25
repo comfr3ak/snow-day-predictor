@@ -432,7 +432,8 @@ namespace SnowDayPredictor.Services
                 {
                     // Store as effective snow (ice × 3 for impact)
                     double effectiveAmount = snowAmount + (iceAmount * 3.0);
-                    bool isIceEvent = iceAmount >= 0.05;  // Primarily ice if we detected ice
+                    // Only classify as ice if ice is PRIMARY component (ice effect > snow)
+                    bool isIceEvent = iceAmount >= 0.05 && (iceAmount * 3.0) > snowAmount;
 
                     winterEvents[period.StartTime.Date] = new WinterEvent
                     {
@@ -447,7 +448,7 @@ namespace SnowDayPredictor.Services
                     }
                     else
                     {
-                        Console.WriteLine($"{period.Name} ({period.StartTime.Date:MM/dd}): {snowAmount:F1}\" snow - TRACKED");
+                        Console.WriteLine($"{period.Name} ({period.StartTime.Date:MM/dd}): {snowAmount:F1}\" snow ({effectiveAmount:F2}\" effective) - TRACKED");
                     }
                 }
                 else
@@ -823,18 +824,19 @@ namespace SnowDayPredictor.Services
                 {
                     // ICE EVENTS: Decay depends on temperature - ice only melts above 32°F
                     double iceDay1Boost = 1.5 + (1.0 - climate.PreparednessIndex);
+                    double boostedBase = Math.Min(95, baseProb * iceDay1Boost);
 
                     if (daysSince == 1)
                     {
                         // Day 1 after ice is CRITICAL
-                        finalProb = Math.Min(95, baseProb * iceDay1Boost);
+                        finalProb = boostedBase;
                         Console.WriteLine($"      ICE Day 1 boost (×{iceDay1Boost:F2}): {finalProb:F1}%");
                     }
                     else if (temperature <= 32)
                     {
-                        // Ice PERSISTS when frozen - slow decay like snow
+                        // Ice PERSISTS when frozen - decay from boosted base
                         double iceSlowDecay = 0.85;
-                        finalProb = baseProb * iceDay1Boost * Math.Pow(iceSlowDecay, daysSince - 1);
+                        finalProb = boostedBase * Math.Pow(iceSlowDecay, daysSince - 1);
                         Console.WriteLine($"      ICE Day {daysSince} frozen ({temperature}°F): {finalProb:F1}%");
                     }
                     else
