@@ -1431,7 +1431,14 @@ namespace SnowDayPredictor.Services
                 }
 
                 // Parse CSV response
-                var alerts = ParseIEMCsvResponse(csvResponse);
+                var allAlerts = ParseIEMCsvResponse(csvResponse);
+
+                // Deduplicate - WFO covers many counties, each gets its own entry
+                // Group by (Type + Onset date) and take one per unique event
+                var alerts = allAlerts
+                    .GroupBy(a => $"{a.Type}_{a.Onset?.Date:yyyy-MM-dd}")
+                    .Select(g => g.First())
+                    .ToList();
 
                 if (!alerts.Any())
                 {
@@ -1439,7 +1446,7 @@ namespace SnowDayPredictor.Services
                     return new List<WeatherAlert>();
                 }
 
-                Console.WriteLine($"✅ HISTORICAL ALERTS: Found {alerts.Count} winter alerts in past {daysBack} days");
+                Console.WriteLine($"✅ HISTORICAL ALERTS: Found {alerts.Count} unique events ({allAlerts.Count} raw entries) in past {daysBack} days");
                 foreach (var alert in alerts.Take(5))
                 {
                     Console.WriteLine($"   - {alert.Type}: {alert.Onset:MM/dd} to {alert.Expires:MM/dd}");
