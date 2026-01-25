@@ -1,8 +1,8 @@
 self.assetsManifest = {
-  "version": "ACIwx794",
+  "version": "5r5e210U",
   "assets": [
     {
-      "hash": "sha256-IlwpMowA5NjIJDlqUmNHPbQkUVjaM0bU7DsaZqnb4NE=",
+      "hash": "sha256-5wURALkfeZTqOJf+UxLC4YbW+T7zMDYmr6MUIaaBatU=",
       "url": "404.html"
     },
     {
@@ -70,8 +70,8 @@ self.assetsManifest = {
       "url": "_framework/Microsoft.JSInterop.betqyv1awt.wasm"
     },
     {
-      "hash": "sha256-qp2Cvhi6iSfK+Rb3DzvOkHQMH9jwLkcP5wGBSLhu6e0=",
-      "url": "_framework/SnowDayPredictor.2lqfm6kt0t.wasm"
+      "hash": "sha256-JQCQsLqqhiE1wuM1Kvb2xXlE5fg+RuWiOHs9Lj8DlfE=",
+      "url": "_framework/SnowDayPredictor.lkobz30bie.wasm"
     },
     {
       "hash": "sha256-KdNyHv0nKivu9Fe5zLs6hNLhy4tsA9jfCT4NkD/r4mU=",
@@ -102,8 +102,8 @@ self.assetsManifest = {
       "url": "_framework/System.IO.Pipelines.5ujx8ulk75.wasm"
     },
     {
-      "hash": "sha256-vUeFjgFuiKur+DS15z8xJg3zuPGeEpr5xlayHb+SrJc=",
-      "url": "_framework/System.Linq.b6an1dbigg.wasm"
+      "hash": "sha256-vFvpzpfPgFCYi8I3yZrrcxVQmmqdUg1kjSaDCCyM0Lw=",
+      "url": "_framework/System.Linq.wx8kqwu6cx.wasm"
     },
     {
       "hash": "sha256-8QuQlI+GDyWHcN0FjzMvQGAyvJDUV+uMf2ELfyaLsdI=",
@@ -158,6 +158,10 @@ self.assetsManifest = {
       "url": "_framework/blazor.webassembly.66stpp682q.js"
     },
     {
+      "hash": "sha256-WRPuAszz+dkJje5g6+BQqlbBhlbWUwnaF1K8o5tFP0w=",
+      "url": "_framework/dotnet.d7da6vt18i.js"
+    },
+    {
       "hash": "sha256-zE11fbcG2CeLl1Zi+NJgMOfWpdjuUWNte+icrtAO58I=",
       "url": "_framework/dotnet.native.87vtjjdetb.js"
     },
@@ -168,10 +172,6 @@ self.assetsManifest = {
     {
       "hash": "sha256-2lZh9yO0fnzm3Xt7yV+Kox3DH3nK7L8hDhm84VT1xco=",
       "url": "_framework/dotnet.runtime.2tx45g8lli.js"
-    },
-    {
-      "hash": "sha256-A1TKv8jpg/wT+oa1Ajy0vZNYs9gXzrvQGpe8Xyh+KuE=",
-      "url": "_framework/dotnet.vtppda3154.js"
     },
     {
       "hash": "sha256-SZLtQnRc0JkwqHab0VUVP7T3uBPSeYzxzDnpxPpUnHk=",
@@ -202,7 +202,7 @@ self.assetsManifest = {
       "url": "icon-512.png"
     },
     {
-      "hash": "sha256-u2HUVtoq1p3PJq0wAR5FoCzS/pEYCgePmZUiTNGlNYA=",
+      "hash": "sha256-+7NSrhm5TPlRhGBu6Bv+tYszZvJ/uXoM86ZW1pkp9Mc=",
       "url": "index.html"
     },
     {
