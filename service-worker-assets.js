@@ -1,8 +1,8 @@
 self.assetsManifest = {
-  "version": "/Ox7S1+z",
+  "version": "Tvw3nN2Y",
   "assets": [
     {
-      "hash": "sha256-bd42GHvNCXxdvgmhYPeNCrBG3gJQnN6duOyxLXObv8s=",
+      "hash": "sha256-uYdsWDFQmfdfxmHiNPkOsTvbbnTELNbdcmn9z5mThI8=",
       "url": "404.html"
     },
     {
@@ -70,8 +70,8 @@ self.assetsManifest = {
       "url": "_framework/Microsoft.JSInterop.betqyv1awt.wasm"
     },
     {
-      "hash": "sha256-v56HvdFg+OySBcXsGaEU6tqLa1dt0Zipzt3Xmd64we0=",
-      "url": "_framework/SnowDayPredictor.1o27kdb3wi.wasm"
+      "hash": "sha256-eUKeFHHzzdEoETFwVTtSRnjOmRyUV/v9SG0cDgU/Kvc=",
+      "url": "_framework/SnowDayPredictor.hao2vzng3j.wasm"
     },
     {
       "hash": "sha256-KdNyHv0nKivu9Fe5zLs6hNLhy4tsA9jfCT4NkD/r4mU=",
@@ -134,8 +134,8 @@ self.assetsManifest = {
       "url": "_framework/System.Runtime.InteropServices.JavaScript.yzg2xf6fe9.wasm"
     },
     {
-      "hash": "sha256-i51HzJPPB5zLurA48h/4l7d7LCaYcnhbX/r+B/l1ayI=",
-      "url": "_framework/System.Runtime.x52e86gqmi.wasm"
+      "hash": "sha256-1mLA99E8rOtlklbrjNWF2ay6XVV1hYgB2xvxFhMcTv0=",
+      "url": "_framework/System.Runtime.ypvdx4vxl4.wasm"
     },
     {
       "hash": "sha256-E04MD5+M8yUnUB3bCz1aqecOvGzLKoWYaMzJ+vxfHro=",
@@ -158,6 +158,10 @@ self.assetsManifest = {
       "url": "_framework/blazor.webassembly.66stpp682q.js"
     },
     {
+      "hash": "sha256-Nsx2uUCLc/6BQQG9APoQwoghdUHjIDmu4GoDxRzTagM=",
+      "url": "_framework/dotnet.ez1vcvnxdm.js"
+    },
+    {
       "hash": "sha256-zE11fbcG2CeLl1Zi+NJgMOfWpdjuUWNte+icrtAO58I=",
       "url": "_framework/dotnet.native.87vtjjdetb.js"
     },
@@ -168,10 +172,6 @@ self.assetsManifest = {
     {
       "hash": "sha256-2lZh9yO0fnzm3Xt7yV+Kox3DH3nK7L8hDhm84VT1xco=",
       "url": "_framework/dotnet.runtime.2tx45g8lli.js"
-    },
-    {
-      "hash": "sha256-XKzVD8rfJyF6Zy15y2DuU/87s5koJfZjIxjIfqSJAyg=",
-      "url": "_framework/dotnet.so6as4ofrz.js"
     },
     {
       "hash": "sha256-SZLtQnRc0JkwqHab0VUVP7T3uBPSeYzxzDnpxPpUnHk=",
@@ -202,7 +202,7 @@ self.assetsManifest = {
       "url": "icon-512.png"
     },
     {
-      "hash": "sha256-JY1Amy0bVD8re4JXpqKWkwelvybdszl/DkvRzvKdNJA=",
+      "hash": "sha256-r3hHaUoNT57PRWHpF3g1aQrwcEoRjCi+rDjEsb4kfc4=",
       "url": "index.html"
     },
     {
