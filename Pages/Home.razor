@@ -171,7 +171,7 @@
                                     }
                                 </div>
                             }
-                            <div class="mt-2"><strong>Forecast:</strong> @forecast.Forecast</div>
+                            <div class="mt-2"><strong>Forecast:</strong> @(!string.IsNullOrEmpty(forecast.DetailedForecast) ? forecast.DetailedForecast : forecast.Forecast)</div>
                         </div>
                     </div>
                 }
@@ -197,7 +197,7 @@
     private string? errorMessage = null;
     private List<SnowDayForecast>? forecasts = null;
     private List<SavedLocation> savedLocations = new();
-    private const int MaxSavedLocations = 5;
+    private const int MaxSavedLocations = 10;
     private string appVersion = "";
     private List<WeatherAlert> activeAlerts = new();
 
