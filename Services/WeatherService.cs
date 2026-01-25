@@ -397,22 +397,24 @@ namespace SnowDayPredictor.Services
             List<Period> periods,
             GeographyContext climate,
             List<WeatherAlert> alerts,
-            Dictionary<DateTime, double> historicalSnowEvents)
+            Dictionary<DateTime, double> historicalSnowEvents,
+            HashSet<DateTime>? historicalIceDates = null)
         {
             var forecasts = new List<SnowDayForecast>();
             var allDailyPeriods = periods.Where(p => p.IsDaytime).Take(7).ToList();
 
             Console.WriteLine($"Processing {allDailyPeriods.Count} forecast periods...");
 
-            // Start with historical snow events (convert to new structure)
+            // Start with historical snow/ice events (convert to new structure)
             var winterEvents = new Dictionary<DateTime, WinterEvent>();
             foreach (var evt in historicalSnowEvents)
             {
+                bool isIce = historicalIceDates?.Contains(evt.Key) ?? false;
                 winterEvents[evt.Key] = new WinterEvent
                 {
                     EffectiveAmount = evt.Value,
-                    IsIceEvent = false,  // Historical events are snow-based
-                    OriginalIceAmount = 0
+                    IsIceEvent = isIce,
+                    OriginalIceAmount = isIce ? evt.Value / 3.0 : 0  // Reverse the 3x multiplier for ice
                 };
             }
 
@@ -1579,6 +1581,7 @@ namespace SnowDayPredictor.Services
             // Build snow events dictionary from historical data
             // Use 0.3" threshold to match keyword estimation (important for low-prep areas)
             var snowEvents = new Dictionary<DateTime, double>();
+            var historicalIceDates = new HashSet<DateTime>(); // Track which events were ice
             foreach (var day in historicalWeather)
             {
                 if (day.SnowfallInches >= 0.3)
@@ -1586,9 +1589,24 @@ namespace SnowDayPredictor.Services
                     snowEvents[day.Date] = day.SnowfallInches;
                     Console.WriteLine($"Adding historical snow event: {day.Date:yyyy-MM-dd} - {day.SnowfallInches:F1}\"");
                 }
+                // Detect potential FREEZING RAIN - precipitation with near-freezing temps but little snow
+                // This catches ice events that Open-Meteo doesn't classify as snow
+                else if (day.Precipitation >= 0.1 && day.TempMin <= 34 && day.SnowfallInches < 0.1)
+                {
+                    // Estimate ice: roughly 10-30% of liquid precip becomes ice glaze
+                    double iceEstimate = day.Precipitation * 0.15;
+                    if (iceEstimate >= 0.02) // At least trace ice
+                    {
+                        // Use ice×3 effective amount (ice is 3x as impactful as snow)
+                        double effectiveAmount = iceEstimate * 3.0;
+                        snowEvents[day.Date] = effectiveAmount;
+                        historicalIceDates.Add(day.Date);
+                        Console.WriteLine($"Adding historical ICE event: {day.Date:yyyy-MM-dd} - {day.Precipitation:F2}\" precip at {day.TempMin:F0}°F min → est {iceEstimate:F2}\" ice");
+                    }
+                }
             }
 
-            return CalculateSnowDayProbabilitiesWithHistory(periods, geography, alerts, snowEvents);
+            return CalculateSnowDayProbabilitiesWithHistory(periods, geography, alerts, snowEvents, historicalIceDates);
         }
 
         /// <summary>
