@@ -1422,7 +1422,20 @@ namespace SnowDayPredictor.Services
                 Console.WriteLine($"📜 FETCHING HISTORICAL ALERTS from IEM for WFO {wfo} ({startDate:MM/dd}-{endDate:MM/dd})");
                 Console.WriteLine($"   URL: {url}");
 
-                var response = await _httpClient.GetFromJsonAsync<IEMAlertResponse>(url);
+                // Fetch as string first to debug response
+                var responseString = await _httpClient.GetStringAsync(url);
+
+                // Log first 300 chars to see what we got
+                var preview = responseString.Length > 300 ? responseString.Substring(0, 300) : responseString;
+                Console.WriteLine($"   Response preview: {preview}");
+
+                if (string.IsNullOrWhiteSpace(responseString) || !responseString.TrimStart().StartsWith("{"))
+                {
+                    Console.WriteLine($"⚠️ IEM returned non-JSON response");
+                    return new List<WeatherAlert>();
+                }
+
+                var response = System.Text.Json.JsonSerializer.Deserialize<IEMAlertResponse>(responseString);
 
                 if (response?.Features == null || !response.Features.Any())
                 {
