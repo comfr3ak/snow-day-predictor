@@ -471,6 +471,27 @@ namespace SnowDayPredictor.Services
                 }
             }
 
+            // ALERT-BASED SYNTHETIC EVENT: For low-prep areas with active alert but no detected events
+            // This ensures aftermath carries forward even when forecast has updated past the event
+            if (climate.PreparednessIndex < 0.3)
+            {
+                var today = DateTime.Today;
+                int alertBonus = GetAlertBonusForDate(alerts, today);
+                if (alertBonus > 0 && !winterEvents.ContainsKey(today))
+                {
+                    // Create synthetic ice event based on alert - assume light ice (typical for these alerts)
+                    double syntheticIce = 0.08; // ~0.08" ice = significant for low-prep area
+                    double effectiveAmount = syntheticIce * 3.0; // Ice multiplier
+                    winterEvents[today] = new WinterEvent
+                    {
+                        EffectiveAmount = effectiveAmount,
+                        IsIceEvent = true,
+                        OriginalIceAmount = syntheticIce
+                    };
+                    Console.WriteLine($"ALERT-BASED SYNTHETIC EVENT: {today:MM/dd} - Created ~{syntheticIce:F2}\" ice event from active alert (low-prep area)");
+                }
+            }
+
             // SECOND PASS: Calculate probabilities for each day
             Console.WriteLine("\n=== SECOND PASS: Calculating probabilities ===");
             foreach (var period in allDailyPeriods)
