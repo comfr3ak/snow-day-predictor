@@ -513,6 +513,7 @@ namespace SnowDayPredictor.Services
                     DelayChance = delayChance,
                     Temperature = period.Temperature,
                     Forecast = period.ShortForecast,
+                    DetailedForecast = period.DetailedForecast,
                     PrecipitationChance = period.ProbabilityOfPrecipitation?.Value ?? 0,
                     SnowfallAmount = !string.IsNullOrEmpty(snowDescription) ? snowDescription : null,
                     IsAftermathDay = isAftermath,

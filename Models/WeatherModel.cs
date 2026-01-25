@@ -217,6 +217,7 @@
         public int DelayChance { get; set; }
         public int Temperature { get; set; }
         public string Forecast { get; set; } = "";
+        public string DetailedForecast { get; set; } = "";
         public int PrecipitationChance { get; set; }
         public string? SnowfallAmount { get; set; }
         public bool IsAftermathDay { get; set; }
