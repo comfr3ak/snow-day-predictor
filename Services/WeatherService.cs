@@ -450,6 +450,22 @@ namespace SnowDayPredictor.Services
                         Console.WriteLine($"{period.Name} ({period.StartTime.Date:MM/dd}): {snowAmount:F1}\" snow - TRACKED");
                     }
                 }
+                else
+                {
+                    // NEW: Check for keyword-based snow events (no explicit amounts but snow in forecast)
+                    // This ensures aftermath logic works for days following keyword-based forecasts
+                    var keywordSnow = EstimateSnowFromKeywords(period, nightPeriod);
+                    if (keywordSnow > 0)
+                    {
+                        winterEvents[period.StartTime.Date] = new WinterEvent
+                        {
+                            EffectiveAmount = keywordSnow,
+                            IsIceEvent = false,
+                            OriginalIceAmount = 0
+                        };
+                        Console.WriteLine($"{period.Name} ({period.StartTime.Date:MM/dd}): ~{keywordSnow:F1}\" snow (keyword-based) - TRACKED");
+                    }
+                }
             }
 
             // SECOND PASS: Calculate probabilities for each day
@@ -920,6 +936,57 @@ namespace SnowDayPredictor.Services
 
             Console.WriteLine($"    Aftermath result: Closure={maxClosureChance}%, Delay={maxDelayChance}%");
             return (Math.Min(95, maxClosureChance), Math.Min(95, maxDelayChance), closestDays);
+        }
+
+        /// <summary>
+        /// Estimate potential snow amount from keywords when no explicit amount is given
+        /// Used in first pass to track potential winter events for aftermath calculations
+        /// </summary>
+        private double EstimateSnowFromKeywords(Period dayPeriod, Period? nightPeriod)
+        {
+            var forecast = (dayPeriod.ShortForecast ?? "").ToLower();
+            var nightForecast = (nightPeriod?.ShortForecast ?? "").ToLower();
+            var combinedForecast = forecast + " " + nightForecast;
+
+            var precipChance = Math.Max(
+                dayPeriod.ProbabilityOfPrecipitation?.Value ?? 0,
+                nightPeriod?.ProbabilityOfPrecipitation?.Value ?? 0
+            );
+            var temp = Math.Min(
+                dayPeriod.Temperature,
+                nightPeriod?.Temperature ?? dayPeriod.Temperature
+            );
+
+            // Must be freezing and have some precip chance
+            if (temp > 34 || precipChance < 20)
+                return 0;
+
+            // Estimate base snow amount from keywords
+            double baseSnow = 0;
+
+            if (combinedForecast.Contains("heavy snow") || combinedForecast.Contains("blizzard"))
+                baseSnow = 6.0;
+            else if (combinedForecast.Contains("snow") && !combinedForecast.Contains("slight") && !combinedForecast.Contains("chance"))
+                baseSnow = 3.0;  // "Snow" or "Light Snow" without qualifiers
+            else if (combinedForecast.Contains("chance") && combinedForecast.Contains("snow") && !combinedForecast.Contains("slight"))
+                baseSnow = 2.0;  // "Chance Snow Showers", "Chance Snow"
+            else if (combinedForecast.Contains("snow showers"))
+                baseSnow = 1.5;
+            else if (combinedForecast.Contains("slight chance") && combinedForecast.Contains("snow"))
+                baseSnow = 1.0;
+            else if (combinedForecast.Contains("flurries"))
+                baseSnow = 0.5;
+
+            if (baseSnow == 0)
+                return 0;
+
+            // Scale by precipitation probability
+            // Higher precip chance = more likely to actually accumulate
+            double scaledSnow = baseSnow * (precipChance / 100.0);
+
+            // Only track if estimated amount is significant enough for aftermath
+            // At least 0.5" effective to matter for road conditions
+            return scaledSnow >= 0.5 ? scaledSnow : 0;
         }
 
         /// <summary>
