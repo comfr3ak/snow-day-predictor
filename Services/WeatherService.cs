@@ -1218,13 +1218,20 @@ namespace SnowDayPredictor.Services
             var precipChance = period.ProbabilityOfPrecipitation?.Value ?? 0;
             var temp = period.Temperature;
 
-            // RULE 1: Must be at or below freezing
-            if (temp >= 38)
+            // Check for EXPLICIT ice keywords in forecast - NWS knows when freezing rain is occurring
+            bool hasFreezingRain = forecast.Contains("freezing rain");
+            bool hasIceStorm = forecast.Contains("ice storm");
+            bool hasFreezingDrizzle = forecast.Contains("freezing drizzle");
+            bool hasSleet = forecast.Contains("sleet") || forecast.Contains("ice pellets");
+            bool hasExplicitIce = hasFreezingRain || hasIceStorm || hasFreezingDrizzle || hasSleet;
+
+            // RULE 1: Temperature check - BUT trust NWS if they explicitly forecast ice
+            // Freezing rain occurs during colder overnight/morning hours even when daytime high is above freezing
+            if (temp >= 38 && !hasExplicitIce)
                 return 0;
 
             // RULE 2: Check for sleet FIRST (ice pellets) - bypass "no accumulation" check
             // Sleet creates icy roads even without traditional ice accumulation
-            bool hasSleet = forecast.Contains("sleet") || forecast.Contains("ice pellets");
             if (hasSleet)
             {
                 double sleetIce = 0.08 * (precipChance / 100.0);
@@ -1241,13 +1248,10 @@ namespace SnowDayPredictor.Services
             }
 
             // RULE 4: Must explicitly mention ICE ACCUMULATION terms in PRIMARY forecast
-            bool hasFreezingRain = forecast.Contains("freezing rain");
-            bool hasIceStorm = forecast.Contains("ice storm");
             bool hasGlaze = forecast.Contains("glaze") || forecast.Contains("glazing");
-            bool hasFreezingDrizzle = forecast.Contains("freezing drizzle");
 
             // If none of these specific ice terms are in the SHORT forecast, return 0
-            if (!hasFreezingRain && !hasIceStorm && !hasGlaze && !hasFreezingDrizzle)
+            if (!hasFreezingRain && !hasIceStorm && !hasGlaze && !hasFreezingDrizzle && !hasSleet)
             {
                 return 0; // No phantom ice!
             }
