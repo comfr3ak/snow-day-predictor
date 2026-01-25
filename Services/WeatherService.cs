@@ -1547,10 +1547,11 @@ namespace SnowDayPredictor.Services
             }
 
             // Build snow events dictionary from historical data
+            // Use 0.3" threshold to match keyword estimation (important for low-prep areas)
             var snowEvents = new Dictionary<DateTime, double>();
             foreach (var day in historicalWeather)
             {
-                if (day.SnowfallInches >= 1.0)
+                if (day.SnowfallInches >= 0.3)
                 {
                     snowEvents[day.Date] = day.SnowfallInches;
                     Console.WriteLine($"Adding historical snow event: {day.Date:yyyy-MM-dd} - {day.SnowfallInches:F1}\"");
