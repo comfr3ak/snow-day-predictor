@@ -842,10 +842,12 @@ namespace SnowDayPredictor.Services
                     }
                     else
                     {
-                        // Ice melts FAST above 32°F
-                        double iceFastDecay = 0.50;
+                        // Ice melts above 32°F, but low-prep areas recover slower
+                        // High-prep: 0.50 decay (clear roads when melting)
+                        // Low-prep: 0.75 decay (can't clear even when melting)
+                        double iceFastDecay = 0.50 + (0.25 * (1.0 - climate.PreparednessIndex));
                         finalProb = baseProb * Math.Pow(iceFastDecay, daysSince);
-                        Console.WriteLine($"      ICE Day {daysSince} melting ({temperature}°F): {finalProb:F1}%");
+                        Console.WriteLine($"      ICE Day {daysSince} melting ({temperature}°F, decay={iceFastDecay:F2}): {finalProb:F1}%");
                     }
                 }
                 else
@@ -856,11 +858,16 @@ namespace SnowDayPredictor.Services
 
                     if (isSmallEvent)
                     {
-                        // Small events: Day 1 only, then near-zero
+                        // Small events: Day 1 boost for low-prep areas, then fast decay
+                        // Low-prep areas close even for small amounts (no equipment)
+                        double lowPrepBoost = 1.0 + (1.2 * (1.0 - climate.PreparednessIndex));
+                        // Low-prep (0.08): 1.0 + 1.10 = 2.10
+                        // High-prep (0.75): 1.0 + 0.30 = 1.30
+
                         if (daysSince == 1)
                         {
-                            finalProb = baseProb * 0.80;
-                            Console.WriteLine($"      SNOW Day 1 (small event): {finalProb:F1}%");
+                            finalProb = Math.Min(95, baseProb * 0.80 * lowPrepBoost);
+                            Console.WriteLine($"      SNOW Day 1 (small event, boost={lowPrepBoost:F2}): {finalProb:F1}%");
                         }
                         else
                         {
