@@ -80,10 +80,10 @@
                 {
                     <p class="location-name">📍 @currentCityName</p>
                 }
-                @if (activeAlerts.Any())
+                @if (activeAlerts.Any(a => !a.Headline.StartsWith("Historical:")))
                 {
                     <div class="alerts-section">
-                        @foreach (var alert in activeAlerts)
+                        @foreach (var alert in activeAlerts.Where(a => !a.Headline.StartsWith("Historical:")))
                         {
                             var alertClass = alert.Severity switch
                             {
