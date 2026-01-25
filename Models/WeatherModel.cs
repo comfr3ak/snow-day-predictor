@@ -17,6 +17,7 @@
     {
         public string Forecast { get; set; } = "";
         public string ForecastHourly { get; set; } = "";
+        public string Cwa { get; set; } = "";  // NWS Weather Forecast Office code (e.g., "MEG", "FFC")
         public RelativeLocation RelativeLocation { get; set; } = new();
     }
 
@@ -322,5 +323,40 @@
         Watch = 2,      // Winter Storm Watch: +20-30%
         Warning = 3,    // Winter Storm Warning: +30-50%
         Extreme = 4     // Blizzard/Ice Storm Warning: +50-70%
+    }
+
+    // IEM (Iowa Environmental Mesonet) Historical Alerts Response
+    // Used to fetch past winter weather alerts when NWS active alerts have expired
+    public class IEMAlertResponse
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("features")]
+        public List<IEMAlertFeature> Features { get; set; } = new();
+    }
+
+    public class IEMAlertFeature
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("properties")]
+        public IEMAlertProperties Properties { get; set; } = new();
+    }
+
+    public class IEMAlertProperties
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("wfo")]
+        public string Wfo { get; set; } = "";  // Weather Forecast Office code
+
+        [System.Text.Json.Serialization.JsonPropertyName("phenomena")]
+        public string Phenomena { get; set; } = "";  // WS=Winter Storm, WW=Winter Weather, BZ=Blizzard, IS=Ice Storm
+
+        [System.Text.Json.Serialization.JsonPropertyName("significance")]
+        public string Significance { get; set; } = "";  // W=Warning, A=Advisory, Y=Advisory
+
+        [System.Text.Json.Serialization.JsonPropertyName("issue")]
+        public DateTime? Issue { get; set; }  // When alert was issued
+
+        [System.Text.Json.Serialization.JsonPropertyName("expire")]
+        public DateTime? Expire { get; set; }  // When alert expires
+
+        [System.Text.Json.Serialization.JsonPropertyName("product_issue")]
+        public DateTime? ProductIssue { get; set; }
     }
 }

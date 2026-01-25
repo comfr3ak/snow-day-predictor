@@ -410,7 +410,7 @@
             loadingStatus = "Getting weather forecast...";
             StateHasChanged();
 
-            var (weatherData, nwsCity, nwsState) = await WeatherService.GetWeatherForecast(coords.Value.lat, coords.Value.lon);
+            var (weatherData, nwsCity, nwsState, wfoCode) = await WeatherService.GetWeatherForecast(coords.Value.lat, coords.Value.lon);
             if (weatherData == null)
             {
                 errorMessage = "Could not retrieve weather data. The National Weather Service API may be temporarily unavailable.";
@@ -478,6 +478,31 @@
 
                 return true;
             }).ToList();
+
+            // Step 5b: Get historical alerts from IEM (for aftermath when active alerts have expired)
+            // Only fetch for low-prep areas where this matters most
+            if (geography.PreparednessIndex < 0.3 && !string.IsNullOrEmpty(wfoCode))
+            {
+                loadingStatus = "Checking recent weather history...";
+                StateHasChanged();
+
+                var historicalAlerts = await WeatherService.GetHistoricalAlertsAsync(wfoCode, daysBack: 5);
+
+                // Add historical alerts that aren't already in active alerts (avoid duplicates)
+                foreach (var histAlert in historicalAlerts)
+                {
+                    // Check if we already have an active alert covering the same period
+                    bool isDuplicate = activeAlerts.Any(a =>
+                        a.Type == histAlert.Type &&
+                        a.Onset?.Date == histAlert.Onset?.Date);
+
+                    if (!isDuplicate)
+                    {
+                        activeAlerts.Add(histAlert);
+                        Console.WriteLine($"Added historical alert to context: {histAlert.Type} ({histAlert.Onset:MM/dd})");
+                    }
+                }
+            }
 
             // Step 6: Calculate snow day chances WITH historical context AND alerts
             loadingStatus = "Calculating snow day probabilities...";
@@ -558,7 +583,7 @@
                 loadingStatus = "Getting weather forecast...";
                 StateHasChanged();
 
-                var (weatherData, nwsCity, nwsState) = await WeatherService.GetWeatherForecast(position.Latitude, position.Longitude);
+                var (weatherData, nwsCity, nwsState, wfoCode) = await WeatherService.GetWeatherForecast(position.Latitude, position.Longitude);
                 if (weatherData == null)
                 {
                     errorMessage = "Could not retrieve weather data for your location.";
@@ -617,6 +642,24 @@
 
                     return true;
                 }).ToList();
+
+                // Get historical alerts for low-prep areas
+                if (geography.PreparednessIndex < 0.3 && !string.IsNullOrEmpty(wfoCode))
+                {
+                    var historicalAlerts = await WeatherService.GetHistoricalAlertsAsync(wfoCode, daysBack: 5);
+                    foreach (var histAlert in historicalAlerts)
+                    {
+                        bool isDuplicate = activeAlerts.Any(a =>
+                            a.Type == histAlert.Type &&
+                            a.Onset?.Date == histAlert.Onset?.Date);
+
+                        if (!isDuplicate)
+                        {
+                            activeAlerts.Add(histAlert);
+                            Console.WriteLine($"Added historical alert: {histAlert.Type} ({histAlert.Onset:MM/dd})");
+                        }
+                    }
+                }
 
                 // Calculate snow day chances
                 loadingStatus = "Calculating snow day probabilities...";
