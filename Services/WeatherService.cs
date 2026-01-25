@@ -1406,45 +1406,41 @@ namespace SnowDayPredictor.Services
 
             try
             {
-                var endDate = DateTime.Today;
-                var startDate = endDate.AddDays(-daysBack);
+                var endDate = DateTime.Today.AddDays(1);  // Include today
+                var startDate = DateTime.Today.AddDays(-daysBack);
 
-                // IEM API for historical alerts - no custom headers to avoid CORS issues
-                // Note: IEM requires array brackets [] for parameters
+                // IEM API - uses ISO8601 dates and CSV format
+                // Phenomena and significance must be aligned pairs (WS+W, WS+A, WW+W, WW+A, etc.)
                 var url = $"https://mesonet.agron.iastate.edu/cgi-bin/request/gis/watchwarn.py?" +
-                          $"year1={startDate.Year}&month1={startDate.Month}&day1={startDate.Day}&" +
-                          $"year2={endDate.Year}&month2={endDate.Month}&day2={endDate.Day}&" +
+                          $"accept=csv&" +
+                          $"sts={startDate:yyyy-MM-dd}T00:00Z&" +
+                          $"ets={endDate:yyyy-MM-dd}T00:00Z&" +
                           $"wfo[]={wfo}&" +
-                          $"phenomena[]=WS&phenomena[]=WW&phenomena[]=BZ&phenomena[]=IS&phenomena[]=ZR&" +
-                          $"significance[]=W&significance[]=A&" +
-                          $"fmt=geojson";
+                          $"limitps=yes&" +
+                          $"phenomena=WS,WS,WW,WW,BZ,BZ,IS,IS,ZR,ZR&" +
+                          $"significance=W,A,W,A,W,A,W,A,W,A";
 
                 Console.WriteLine($"📜 FETCHING HISTORICAL ALERTS from IEM for WFO {wfo} ({startDate:MM/dd}-{endDate:MM/dd})");
-                Console.WriteLine($"   URL: {url}");
 
-                var response = await _httpClient.GetFromJsonAsync<IEMAlertResponse>(url);
+                var csvResponse = await _httpClient.GetStringAsync(url);
 
-                if (response?.Features == null || !response.Features.Any())
+                if (string.IsNullOrWhiteSpace(csvResponse))
                 {
                     Console.WriteLine($"✅ No historical winter alerts found for WFO {wfo}");
                     return new List<WeatherAlert>();
                 }
 
-                var alerts = response.Features
-                    .Select(f => new WeatherAlert
-                    {
-                        Type = ConvertIEMPhenomenaToEventType(f.Properties.Phenomena, f.Properties.Significance),
-                        Headline = $"Historical: {ConvertIEMPhenomenaToEventType(f.Properties.Phenomena, f.Properties.Significance)}",
-                        Description = $"WFO: {f.Properties.Wfo}",
-                        Severity = ConvertIEMToSeverity(f.Properties.Phenomena, f.Properties.Significance),
-                        Onset = f.Properties.Issue ?? f.Properties.ProductIssue,
-                        Expires = f.Properties.Expire,
-                        Ends = f.Properties.Expire
-                    })
-                    .ToList();
+                // Parse CSV response
+                var alerts = ParseIEMCsvResponse(csvResponse);
+
+                if (!alerts.Any())
+                {
+                    Console.WriteLine($"✅ No historical winter alerts found for WFO {wfo}");
+                    return new List<WeatherAlert>();
+                }
 
                 Console.WriteLine($"✅ HISTORICAL ALERTS: Found {alerts.Count} winter alerts in past {daysBack} days");
-                foreach (var alert in alerts.Take(5))  // Log first 5
+                foreach (var alert in alerts.Take(5))
                 {
                     Console.WriteLine($"   - {alert.Type}: {alert.Onset:MM/dd} to {alert.Expires:MM/dd}");
                 }
@@ -1456,6 +1452,66 @@ namespace SnowDayPredictor.Services
                 Console.WriteLine($"❌ Historical alerts fetch failed: {ex.Message}");
                 return new List<WeatherAlert>();
             }
+        }
+
+        /// <summary>
+        /// Parse IEM CSV response into WeatherAlert list
+        /// CSV columns typically: wfo,utc_issue,utc_expire,phenomena,significance,eventid,...
+        /// </summary>
+        private List<WeatherAlert> ParseIEMCsvResponse(string csv)
+        {
+            var alerts = new List<WeatherAlert>();
+            var lines = csv.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            if (lines.Length < 2) return alerts;  // Need header + at least one data row
+
+            // Parse header to find column indices
+            var header = lines[0].Split(',');
+            int wfoIdx = Array.IndexOf(header, "wfo");
+            int issueIdx = Array.IndexOf(header, "utc_issue");
+            int expireIdx = Array.IndexOf(header, "utc_expire");
+            int phenIdx = Array.IndexOf(header, "phenomena");
+            int sigIdx = Array.IndexOf(header, "significance");
+
+            // Log header for debugging
+            Console.WriteLine($"   CSV columns: {string.Join(", ", header.Take(10))}...");
+
+            for (int i = 1; i < lines.Length; i++)
+            {
+                try
+                {
+                    var cols = lines[i].Split(',');
+                    if (cols.Length < 5) continue;
+
+                    var phenomena = phenIdx >= 0 && phenIdx < cols.Length ? cols[phenIdx] : "";
+                    var significance = sigIdx >= 0 && sigIdx < cols.Length ? cols[sigIdx] : "";
+
+                    DateTime? issue = null;
+                    DateTime? expire = null;
+
+                    if (issueIdx >= 0 && issueIdx < cols.Length && DateTime.TryParse(cols[issueIdx], out var issueDt))
+                        issue = issueDt;
+                    if (expireIdx >= 0 && expireIdx < cols.Length && DateTime.TryParse(cols[expireIdx], out var expireDt))
+                        expire = expireDt;
+
+                    alerts.Add(new WeatherAlert
+                    {
+                        Type = ConvertIEMPhenomenaToEventType(phenomena, significance),
+                        Headline = $"Historical: {ConvertIEMPhenomenaToEventType(phenomena, significance)}",
+                        Description = $"WFO: {(wfoIdx >= 0 && wfoIdx < cols.Length ? cols[wfoIdx] : "")}",
+                        Severity = ConvertIEMToSeverity(phenomena, significance),
+                        Onset = issue,
+                        Expires = expire,
+                        Ends = expire
+                    });
+                }
+                catch
+                {
+                    // Skip malformed rows
+                }
+            }
+
+            return alerts;
         }
 
         private string ConvertIEMPhenomenaToEventType(string phenomena, string significance)
