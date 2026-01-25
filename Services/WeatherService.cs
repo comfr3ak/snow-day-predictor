@@ -821,31 +821,51 @@ namespace SnowDayPredictor.Services
 
                 if (evt.IsIceEvent)
                 {
-                    // ICE EVENTS: Critical Day 1 (power outages, black ice), fast decay after
+                    // ICE EVENTS: Decay depends on temperature - ice only melts above 32°F
+                    double iceDay1Boost = 1.5 + (1.0 - climate.PreparednessIndex);
+
                     if (daysSince == 1)
                     {
-                        // Day 1 after ice is CRITICAL - boost based on lack of preparedness
-                        // Low prep areas struggle most with power outages and ice removal
-                        double iceDay1Boost = 1.5 + (1.0 - climate.PreparednessIndex);
-                        // Examples:
-                        // - Greenville (prep 0.08): boost = 1.5 + 0.92 = 2.42x
-                        // - Chicago (prep 0.75): boost = 1.5 + 0.25 = 1.75x
+                        // Day 1 after ice is CRITICAL
                         finalProb = Math.Min(95, baseProb * iceDay1Boost);
                         Console.WriteLine($"      ICE Day 1 boost (×{iceDay1Boost:F2}): {finalProb:F1}%");
                     }
+                    else if (temperature <= 32)
+                    {
+                        // Ice PERSISTS when frozen - slow decay like snow
+                        double iceSlowDecay = 0.85;
+                        finalProb = baseProb * iceDay1Boost * Math.Pow(iceSlowDecay, daysSince - 1);
+                        Console.WriteLine($"      ICE Day {daysSince} frozen ({temperature}°F): {finalProb:F1}%");
+                    }
                     else
                     {
-                        // Ice melts FAST above 32°F - apply aggressive decay
-                        // Day 2+: 50% decay per day (ice disappears quickly when melting)
+                        // Ice melts FAST above 32°F
                         double iceFastDecay = 0.50;
                         finalProb = baseProb * Math.Pow(iceFastDecay, daysSince);
-                        Console.WriteLine($"      ICE Day {daysSince} fast decay (50%/day): {finalProb:F1}%");
+                        Console.WriteLine($"      ICE Day {daysSince} melting ({temperature}°F): {finalProb:F1}%");
                     }
                 }
                 else
                 {
-                    // SNOW EVENTS: Standard decay logic (snow persists longer)
-                    if (daysSince == 1)
+                    // SNOW EVENTS: Decay based on event size and preparedness
+                    // Small events (< 1") decay fast - likely keyword-based estimates
+                    bool isSmallEvent = effectiveAmount < 1.0;
+
+                    if (isSmallEvent)
+                    {
+                        // Small events: Day 1 only, then near-zero
+                        if (daysSince == 1)
+                        {
+                            finalProb = baseProb * 0.80;
+                            Console.WriteLine($"      SNOW Day 1 (small event): {finalProb:F1}%");
+                        }
+                        else
+                        {
+                            finalProb = baseProb * 0.10; // Minimal by Day 2+
+                            Console.WriteLine($"      SNOW Day {daysSince} (small event, fast decay): {finalProb:F1}%");
+                        }
+                    }
+                    else if (daysSince == 1)
                     {
                         finalProb = baseProb * 0.95;
                         Console.WriteLine($"      SNOW Day 1 decay: {finalProb:F1}%");
