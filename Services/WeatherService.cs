@@ -979,7 +979,25 @@ namespace SnowDayPredictor.Services
             }
             else if (alertBonus > 0 && maxClosureChance == 0 && maxDelayChance == 0)
             {
-                Console.WriteLine($"    Alert active for {currentDate:MM/dd} (+{alertBonus}% potential) but no aftermath events");
+                // Alert is active but no winter events detected (forecast may have updated past the event)
+                // For low-prep areas, the alert itself is strong evidence of school closures
+                if (climate.PreparednessIndex < 0.3)
+                {
+                    // Low-prep areas: Alert alone warrants significant closure probability
+                    // These areas close preemptively for any winter weather - NWS doesn't issue alerts lightly
+                    double alertOnlyClosure = 80 * (1.0 - climate.PreparednessIndex);
+                    // At prep 0.08: 80 * 0.92 = 73.6%
+                    // At prep 0.15: 80 * 0.85 = 68%
+                    // At prep 0.25: 80 * 0.75 = 60%
+                    maxClosureChance = (int)Math.Round(alertOnlyClosure);
+                    maxDelayChance = Math.Min(60, maxClosureChance / 2 + 25);
+                    Console.WriteLine($"    Alert-only boost for low-prep area (prep={climate.PreparednessIndex:F2}): Closure={maxClosureChance}%, Delay={maxDelayChance}%");
+                }
+                else
+                {
+                    // Higher-prep areas: Alert alone isn't enough, need actual snow/ice detection
+                    Console.WriteLine($"    Alert active for {currentDate:MM/dd} (+{alertBonus}% potential) but no aftermath events");
+                }
             }
             else if (GetAlertBonus(alerts) > 0 && alertBonus == 0)
             {
