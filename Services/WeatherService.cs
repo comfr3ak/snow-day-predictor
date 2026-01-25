@@ -542,7 +542,8 @@ namespace SnowDayPredictor.Services
                 date,
                 temperature,
                 climate,
-                winterEvents
+                winterEvents,
+                alerts
             );
 
             // Check direct probability (handles both explicit amounts AND keywords)
@@ -707,7 +708,8 @@ namespace SnowDayPredictor.Services
             DateTime currentDate,
             int temperature,
             GeographyContext climate,
-            Dictionary<DateTime, WinterEvent> winterEvents)
+            Dictionary<DateTime, WinterEvent> winterEvents,
+            List<WeatherAlert> alerts)
         {
             Console.WriteLine($"  Aftermath check for {currentDate:MM/dd}:");
             Console.WriteLine($"    Winter events in history: {winterEvents.Count}");
@@ -932,6 +934,22 @@ namespace SnowDayPredictor.Services
                     closestDays = daysSince;
                     Console.WriteLine($"      *** NEW MAX ***");
                 }
+            }
+
+            // Apply alert bonus to aftermath (active alerts indicate ongoing dangerous conditions)
+            int alertBonus = GetAlertBonus(alerts);
+            if (alertBonus > 0 && (maxClosureChance > 0 || maxDelayChance > 0))
+            {
+                // Alerts significantly boost aftermath - roads may still be dangerous
+                int boostedClosure = Math.Min(95, maxClosureChance + alertBonus / 2);
+                int boostedDelay = Math.Min(95, maxDelayChance + alertBonus / 2);
+                Console.WriteLine($"    Alert bonus (+{alertBonus / 2}%): Closure={maxClosureChance}%→{boostedClosure}%, Delay={maxDelayChance}%→{boostedDelay}%");
+                maxClosureChance = boostedClosure;
+                maxDelayChance = boostedDelay;
+            }
+            else if (alertBonus > 0)
+            {
+                Console.WriteLine($"    Alert active (+{alertBonus}% potential) but no aftermath events found");
             }
 
             Console.WriteLine($"    Aftermath result: Closure={maxClosureChance}%, Delay={maxDelayChance}%");
