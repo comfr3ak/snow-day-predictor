@@ -1002,7 +1002,8 @@ namespace SnowDayPredictor.Services
             );
 
             // Must be freezing and have some precip chance
-            if (temp > 34 || precipChance < 20)
+            // Lower threshold (15%) for low-prep areas where any snow matters
+            if (temp > 34 || precipChance < 15)
                 return 0;
 
             // Estimate base snow amount from keywords
@@ -1029,8 +1030,8 @@ namespace SnowDayPredictor.Services
             double scaledSnow = baseSnow * (precipChance / 100.0);
 
             // Only track if estimated amount is significant enough for aftermath
-            // At least 0.5" effective to matter for road conditions
-            return scaledSnow >= 0.5 ? scaledSnow : 0;
+            // Lower threshold (0.3") for low-prep areas where trace amounts matter
+            return scaledSnow >= 0.3 ? scaledSnow : 0;
         }
 
         /// <summary>
