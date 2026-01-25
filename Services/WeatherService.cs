@@ -1410,15 +1410,17 @@ namespace SnowDayPredictor.Services
                 var startDate = endDate.AddDays(-daysBack);
 
                 // IEM API for historical alerts - no custom headers to avoid CORS issues
+                // Note: IEM requires array brackets [] for parameters
                 var url = $"https://mesonet.agron.iastate.edu/cgi-bin/request/gis/watchwarn.py?" +
                           $"year1={startDate.Year}&month1={startDate.Month}&day1={startDate.Day}&" +
                           $"year2={endDate.Year}&month2={endDate.Month}&day2={endDate.Day}&" +
-                          $"wfo={wfo}&" +
-                          $"phenomena=WS&phenomena=WW&phenomena=BZ&phenomena=IS&phenomena=ZR&" +  // Winter Storm, Winter Weather, Blizzard, Ice Storm, Freezing Rain
-                          $"significance=W&significance=A&" +  // Warning, Advisory
+                          $"wfo[]={wfo}&" +
+                          $"phenomena[]=WS&phenomena[]=WW&phenomena[]=BZ&phenomena[]=IS&phenomena[]=ZR&" +
+                          $"significance[]=W&significance[]=A&" +
                           $"fmt=geojson";
 
                 Console.WriteLine($"📜 FETCHING HISTORICAL ALERTS from IEM for WFO {wfo} ({startDate:MM/dd}-{endDate:MM/dd})");
+                Console.WriteLine($"   URL: {url}");
 
                 var response = await _httpClient.GetFromJsonAsync<IEMAlertResponse>(url);
 
