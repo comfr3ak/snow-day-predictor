@@ -5,6 +5,6 @@ export async function getVersion() {
         return data.version;
     } catch (error) {
         console.error('Version load error:', error);
-        return '2026.01.25.1536';
+        return '2026.01.25.1916';
     }
 }
