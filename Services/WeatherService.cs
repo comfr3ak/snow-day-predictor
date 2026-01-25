@@ -833,9 +833,9 @@ namespace SnowDayPredictor.Services
                         finalProb = boostedBase;
                         Console.WriteLine($"      ICE Day 1 boost (×{iceDay1Boost:F2}): {finalProb:F1}%");
                     }
-                    else if (temperature <= 32)
+                    else if (temperature < 32)
                     {
-                        // Ice PERSISTS when frozen - decay from boosted base
+                        // Ice PERSISTS when solidly frozen - decay from boosted base
                         double iceSlowDecay = 0.85;
                         finalProb = boostedBase * Math.Pow(iceSlowDecay, daysSince - 1);
                         Console.WriteLine($"      ICE Day {daysSince} frozen ({temperature}°F): {finalProb:F1}%");
