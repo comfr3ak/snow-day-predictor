@@ -493,8 +493,7 @@ namespace SnowDayPredictor.Services
                     {
                         EffectiveAmount = effectiveAmount,
                         IsIceEvent = isIce,
-                        OriginalIceAmount = isIce ? syntheticSnow : 0,
-                        OriginalSnowAmount = isIce ? 0 : syntheticSnow
+                        OriginalIceAmount = isIce ? syntheticSnow : 0
                     };
                     Console.WriteLine($"ALERT-BASED SYNTHETIC EVENT: {checkDate:MM/dd} - Created ~{syntheticSnow:F2}\" {(isIce ? "ice" : "snow")} event from HISTORICAL alert ({daysAgo}d ago)");
                 }
