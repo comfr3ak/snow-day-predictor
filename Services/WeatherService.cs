@@ -499,22 +499,27 @@ namespace SnowDayPredictor.Services
                 }
             }
 
-            // For LOW-PREP areas only: Also check TODAY with any active alert
-            if (climate.PreparednessIndex < 0.3)
+            // For ALL areas: Check TODAY and TOMORROW with active NWS alerts
+            // When NWS issues a Warning/Advisory, trust it - create synthetic event if none detected
+            // This handles cases where forecast has updated to clear but alert is still active
+            var activeNwsAlerts = alerts.Where(a => !a.Headline.StartsWith("Historical:")).ToList();
+            for (int daysAhead = 0; daysAhead <= 1; daysAhead++)
             {
-                var checkDate = DateTime.Today;
-                int alertBonus = GetAlertBonusForDate(alerts, checkDate, climate.PreparednessIndex);
+                var checkDate = DateTime.Today.AddDays(daysAhead);
+                int alertBonus = GetAlertBonusForDate(activeNwsAlerts, checkDate, climate.PreparednessIndex);
                 if (alertBonus > 0 && !winterEvents.ContainsKey(checkDate))
                 {
-                    double syntheticIce = 0.08;
-                    double effectiveAmount = syntheticIce * 3.0;
+                    // Use ice for low-prep, snow for higher-prep
+                    bool isIce = climate.PreparednessIndex < 0.3;
+                    double syntheticAmount = isIce ? 0.08 : 4.0;
+                    double effectiveAmount = isIce ? syntheticAmount * 3.0 : syntheticAmount;
                     winterEvents[checkDate] = new WinterEvent
                     {
                         EffectiveAmount = effectiveAmount,
-                        IsIceEvent = true,
-                        OriginalIceAmount = syntheticIce
+                        IsIceEvent = isIce,
+                        OriginalIceAmount = isIce ? syntheticAmount : 0
                     };
-                    Console.WriteLine($"ALERT-BASED SYNTHETIC EVENT: {checkDate:MM/dd} - Created ~{syntheticIce:F2}\" ice event from active alert (low-prep area, today)");
+                    Console.WriteLine($"ALERT-BASED SYNTHETIC EVENT: {checkDate:MM/dd} - Created ~{syntheticAmount:F2}\" {(isIce ? "ice" : "snow")} event from ACTIVE NWS alert ({(daysAhead == 0 ? "today" : "tomorrow")})");
                 }
             }
 
