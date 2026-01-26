@@ -486,7 +486,7 @@
                 loadingStatus = "Checking recent weather history...";
                 StateHasChanged();
 
-                var historicalAlerts = await WeatherService.GetHistoricalAlertsAsync(wfoCode, daysBack: 5);
+                var historicalAlerts = await WeatherService.GetHistoricalAlertsAsync(wfoCode, daysBack: 7);
 
                 // Add historical alerts that aren't already in active alerts (avoid duplicates)
                 foreach (var histAlert in historicalAlerts)
@@ -646,7 +646,7 @@
                 // Always get historical alerts - we need storm history even if alerts expired
                 if (!string.IsNullOrEmpty(wfoCode))
                 {
-                    var historicalAlerts = await WeatherService.GetHistoricalAlertsAsync(wfoCode, daysBack: 5);
+                    var historicalAlerts = await WeatherService.GetHistoricalAlertsAsync(wfoCode, daysBack: 7);
                     foreach (var histAlert in historicalAlerts)
                     {
                         bool isDuplicate = activeAlerts.Any(a =>
