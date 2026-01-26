@@ -476,8 +476,9 @@ namespace SnowDayPredictor.Services
             // For LOW-PREP only: Also check today's active alerts
             var historicalAlerts = alerts.Where(a => a.Headline.StartsWith("Historical:")).ToList();
 
-            // Check past 5 days using HISTORICAL alerts (for all prep levels)
-            for (int daysAgo = 1; daysAgo <= 5; daysAgo++)
+            // Check past 7 days using HISTORICAL alerts (for all prep levels)
+            // Covers: max TypicalClosureDays (4) + Day 5-6 delay-only aftermath + 1 buffer
+            for (int daysAgo = 1; daysAgo <= 7; daysAgo++)
             {
                 var checkDate = DateTime.Today.AddDays(-daysAgo);
                 int alertBonus = GetAlertBonusForDate(historicalAlerts, checkDate, climate.PreparednessIndex);
