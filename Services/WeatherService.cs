@@ -471,36 +471,50 @@ namespace SnowDayPredictor.Services
                 }
             }
 
-            // ALERT-BASED SYNTHETIC EVENTS: For low-prep areas with alerts but no detected events
-            // This ensures aftermath carries forward even when forecast has updated past the event
-            // IMPORTANT: For PAST days, only use HISTORICAL alerts (from IEM) - not current active alerts
-            // Current active alerts only apply to TODAY and forward
+            // ALERT-BASED SYNTHETIC EVENTS: Create from historical alerts when forecast has updated past the event
+            // For ALL prep levels: Check HISTORICAL alerts (from IEM) for past days
+            // For LOW-PREP only: Also check today's active alerts
+            var historicalAlerts = alerts.Where(a => a.Headline.StartsWith("Historical:")).ToList();
+
+            // Check past 5 days using HISTORICAL alerts (for all prep levels)
+            for (int daysAgo = 1; daysAgo <= 5; daysAgo++)
+            {
+                var checkDate = DateTime.Today.AddDays(-daysAgo);
+                int alertBonus = GetAlertBonusForDate(historicalAlerts, checkDate, climate.PreparednessIndex);
+                if (alertBonus > 0 && !winterEvents.ContainsKey(checkDate))
+                {
+                    // Create synthetic snow event based on historical alert
+                    // Use snow (not ice) as default for mid/high prep areas
+                    double syntheticSnow = climate.PreparednessIndex < 0.3 ? 0.08 : 4.0; // Light ice for low-prep, moderate snow for others
+                    bool isIce = climate.PreparednessIndex < 0.3;
+                    double effectiveAmount = isIce ? syntheticSnow * 3.0 : syntheticSnow;
+                    winterEvents[checkDate] = new WinterEvent
+                    {
+                        EffectiveAmount = effectiveAmount,
+                        IsIceEvent = isIce,
+                        OriginalIceAmount = isIce ? syntheticSnow : 0,
+                        OriginalSnowAmount = isIce ? 0 : syntheticSnow
+                    };
+                    Console.WriteLine($"ALERT-BASED SYNTHETIC EVENT: {checkDate:MM/dd} - Created ~{syntheticSnow:F2}\" {(isIce ? "ice" : "snow")} event from HISTORICAL alert ({daysAgo}d ago)");
+                }
+            }
+
+            // For LOW-PREP areas only: Also check TODAY with any active alert
             if (climate.PreparednessIndex < 0.3)
             {
-                for (int daysAgo = 0; daysAgo <= 5; daysAgo++)
+                var checkDate = DateTime.Today;
+                int alertBonus = GetAlertBonusForDate(alerts, checkDate, climate.PreparednessIndex);
+                if (alertBonus > 0 && !winterEvents.ContainsKey(checkDate))
                 {
-                    var checkDate = DateTime.Today.AddDays(-daysAgo);
-
-                    // For past days, only check HISTORICAL alerts (marked with "Historical:" headline)
-                    // For today, any alert can apply
-                    var alertsToCheck = daysAgo > 0
-                        ? alerts.Where(a => a.Headline.StartsWith("Historical:")).ToList()
-                        : alerts;
-
-                    int alertBonus = GetAlertBonusForDate(alertsToCheck, checkDate, climate.PreparednessIndex);
-                    if (alertBonus > 0 && !winterEvents.ContainsKey(checkDate))
+                    double syntheticIce = 0.08;
+                    double effectiveAmount = syntheticIce * 3.0;
+                    winterEvents[checkDate] = new WinterEvent
                     {
-                        // Create synthetic ice event based on alert - assume light ice (typical for these alerts)
-                        double syntheticIce = 0.08; // ~0.08" ice = significant for low-prep area
-                        double effectiveAmount = syntheticIce * 3.0; // Ice multiplier
-                        winterEvents[checkDate] = new WinterEvent
-                        {
-                            EffectiveAmount = effectiveAmount,
-                            IsIceEvent = true,
-                            OriginalIceAmount = syntheticIce
-                        };
-                        Console.WriteLine($"ALERT-BASED SYNTHETIC EVENT: {checkDate:MM/dd} - Created ~{syntheticIce:F2}\" ice event from HISTORICAL alert (low-prep area, {daysAgo}d ago)");
-                    }
+                        EffectiveAmount = effectiveAmount,
+                        IsIceEvent = true,
+                        OriginalIceAmount = syntheticIce
+                    };
+                    Console.WriteLine($"ALERT-BASED SYNTHETIC EVENT: {checkDate:MM/dd} - Created ~{syntheticIce:F2}\" ice event from active alert (low-prep area, today)");
                 }
             }
 
