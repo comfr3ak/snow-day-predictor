@@ -1032,7 +1032,41 @@ namespace SnowDayPredictor.Services
 
             // Apply alert bonus to aftermath ONLY if alerts are still active for this date (scaled by prep)
             int alertBonus = GetAlertBonusForDate(alerts, currentDate, climate.PreparednessIndex);
-            if (alertBonus > 0 && (maxClosureChance > 0 || maxDelayChance > 0))
+
+            // SPECIAL CASE: If there's an active alert AND a winter event for TODAY (daysSince=0),
+            // this is a "direct" event day, not aftermath. Apply higher probability floor.
+            bool hasTodayEvent = winterEvents.ContainsKey(currentDate);
+            if (alertBonus > 0 && hasTodayEvent)
+            {
+                // Active alert + event for today = high confidence closure
+                // Scale by preparedness but maintain minimum floor
+                // Warning (alertBonus ~13-40) → 65-85% base
+                // Advisory (alertBonus ~5-15) → 45-60% base
+                int rawAlertBonus = GetAlertBonusForDate(alerts.Where(a => !a.Headline.StartsWith("Historical:")).ToList(), currentDate, 0); // Get unscaled
+                double alertFloor = rawAlertBonus switch
+                {
+                    >= 50 => 85, // Extreme (Blizzard)
+                    >= 35 => 75, // Warning
+                    >= 20 => 60, // Watch
+                    >= 10 => 50, // Advisory
+                    _ => 40
+                };
+                // Scale down by preparedness (high-prep areas handle weather better)
+                double scaledFloor = alertFloor * (1.0 - climate.PreparednessIndex * 0.4);
+                // At prep 0.08: 75 * 0.97 = 72.8%
+                // At prep 0.50: 75 * 0.80 = 60%
+                // At prep 0.73: 75 * 0.71 = 53%
+                // At prep 0.95: 75 * 0.62 = 46.5%
+
+                int floorClosure = (int)Math.Round(scaledFloor);
+                if (floorClosure > maxClosureChance)
+                {
+                    maxClosureChance = floorClosure;
+                    maxDelayChance = Math.Max(maxDelayChance, floorClosure / 2 + 10);
+                    Console.WriteLine($"    Active alert + today's event: Floor={floorClosure}% (raw alert={rawAlertBonus}, prep={climate.PreparednessIndex:F2})");
+                }
+            }
+            else if (alertBonus > 0 && (maxClosureChance > 0 || maxDelayChance > 0))
             {
                 // Alerts boost aftermath - but only when alert covers this day
                 int boostedClosure = Math.Min(95, maxClosureChance + alertBonus / 2);
