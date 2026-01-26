@@ -480,8 +480,8 @@
             }).ToList();
 
             // Step 5b: Get historical alerts from IEM (for aftermath when active alerts have expired)
-            // Only fetch for low-prep areas where this matters most
-            if (geography.PreparednessIndex < 0.3 && !string.IsNullOrEmpty(wfoCode))
+            // Fetch for low-prep areas OR when there are active alerts (to get storm history)
+            if ((geography.PreparednessIndex < 0.3 || activeAlerts.Any()) && !string.IsNullOrEmpty(wfoCode))
             {
                 loadingStatus = "Checking recent weather history...";
                 StateHasChanged();
@@ -643,8 +643,8 @@
                     return true;
                 }).ToList();
 
-                // Get historical alerts for low-prep areas
-                if (geography.PreparednessIndex < 0.3 && !string.IsNullOrEmpty(wfoCode))
+                // Get historical alerts when there are active alerts or for low-prep areas
+                if ((geography.PreparednessIndex < 0.3 || activeAlerts.Any()) && !string.IsNullOrEmpty(wfoCode))
                 {
                     var historicalAlerts = await WeatherService.GetHistoricalAlertsAsync(wfoCode, daysBack: 5);
                     foreach (var histAlert in historicalAlerts)
