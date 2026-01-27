@@ -472,31 +472,42 @@ namespace SnowDayPredictor.Services
             }
 
             // ALERT-BASED SYNTHETIC EVENTS: Create from historical alerts when forecast has updated past the event
-            // For ALL prep levels: Check HISTORICAL alerts (from IEM) for past days
-            // For LOW-PREP only: Also check today's active alerts
+            // KEY FIX: Create ONE event per unique storm (on its onset date), not one per day the alert covered
             var historicalAlerts = alerts.Where(a => a.Headline.StartsWith("Historical:")).ToList();
 
-            // Check past 7 days using HISTORICAL alerts (for all prep levels)
-            // Covers: max TypicalClosureDays (4) + Day 5-6 delay-only aftermath + 1 buffer
-            for (int daysAgo = 1; daysAgo <= 7; daysAgo++)
+            // Process each unique historical alert ONCE - create synthetic event on its ONSET date
+            // This prevents creating multiple events for a single multi-day storm
+            foreach (var alert in historicalAlerts)
             {
-                var checkDate = DateTime.Today.AddDays(-daysAgo);
-                int alertBonus = GetAlertBonusForDate(historicalAlerts, checkDate, climate.PreparednessIndex);
-                if (alertBonus > 0 && !winterEvents.ContainsKey(checkDate))
+                // Use the alert's onset date as the event date (when the storm started)
+                var eventDate = (alert.Onset ?? alert.Effective ?? DateTime.Today.AddDays(-1)).Date;
+
+                // Only process if within our lookback window (7 days)
+                var daysSince = (DateTime.Today - eventDate).Days;
+                if (daysSince < 1 || daysSince > 7)
                 {
-                    // Create synthetic snow event based on historical alert
-                    // Use snow (not ice) as default for mid/high prep areas
-                    double syntheticSnow = climate.PreparednessIndex < 0.3 ? 0.08 : 4.0; // Light ice for low-prep, moderate snow for others
-                    bool isIce = climate.PreparednessIndex < 0.3;
-                    double effectiveAmount = isIce ? syntheticSnow * 3.0 : syntheticSnow;
-                    winterEvents[checkDate] = new WinterEvent
-                    {
-                        EffectiveAmount = effectiveAmount,
-                        IsIceEvent = isIce,
-                        OriginalIceAmount = isIce ? syntheticSnow : 0
-                    };
-                    Console.WriteLine($"ALERT-BASED SYNTHETIC EVENT: {checkDate:MM/dd} - Created ~{syntheticSnow:F2}\" {(isIce ? "ice" : "snow")} event from HISTORICAL alert ({daysAgo}d ago)");
+                    Console.WriteLine($"ALERT SKIPPED: {alert.Headline} - onset {eventDate:MM/dd} outside 7-day window");
+                    continue;
                 }
+
+                // Skip if we already have an event for this date (from forecast or another alert)
+                if (winterEvents.ContainsKey(eventDate))
+                {
+                    Console.WriteLine($"ALERT SKIPPED: {alert.Headline} - event already exists for {eventDate:MM/dd}");
+                    continue;
+                }
+
+                // Create ONE synthetic event for this storm on its onset date
+                bool isIce = climate.PreparednessIndex < 0.3;
+                double syntheticAmount = isIce ? 0.08 : 4.0;
+                double effectiveAmount = isIce ? syntheticAmount * 3.0 : syntheticAmount;
+                winterEvents[eventDate] = new WinterEvent
+                {
+                    EffectiveAmount = effectiveAmount,
+                    IsIceEvent = isIce,
+                    OriginalIceAmount = isIce ? syntheticAmount : 0
+                };
+                Console.WriteLine($"ALERT-BASED SYNTHETIC EVENT: {eventDate:MM/dd} - Created ~{syntheticAmount:F2}\" {(isIce ? "ice" : "snow")} event from HISTORICAL alert \"{alert.Headline}\" ({daysSince}d ago)");
             }
 
             // For ALL areas: Check TODAY and TOMORROW with active NWS alerts
@@ -1660,19 +1671,24 @@ namespace SnowDayPredictor.Services
         {
             if (!alerts.Any()) return 0;
 
-            // Filter to alerts that are active for this date
+            // Filter to alerts that were actually active ON this specific date
+            // An alert is active on a date if: onset <= date <= end
             var activeAlerts = alerts.Where(a =>
             {
                 // Use Ends if available, otherwise Expires
                 var endDate = a.Ends ?? a.Expires;
+                var startDate = a.Onset ?? a.Effective;
 
                 // If no end date, assume alert is for today/tomorrow only
                 if (!endDate.HasValue)
-                    return date.Date <= DateTime.Today.AddDays(1);
+                    return date.Date >= DateTime.Today && date.Date <= DateTime.Today.AddDays(1);
 
-                // Alert is active if date is before the end date
-                // (Onset is typically in the past or today)
-                return date.Date <= endDate.Value.Date;
+                // If no start date, use a reasonable default (7 days before end)
+                if (!startDate.HasValue)
+                    startDate = endDate.Value.AddDays(-7);
+
+                // Alert is active on this date if date falls WITHIN the alert period
+                return date.Date >= startDate.Value.Date && date.Date <= endDate.Value.Date;
             }).ToList();
 
             if (!activeAlerts.Any())
