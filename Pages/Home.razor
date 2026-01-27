@@ -79,6 +79,10 @@
                 @if (!string.IsNullOrEmpty(currentCityName))
                 {
                     <p class="location-name">📍 @currentCityName</p>
+                    @if (currentGeography != null)
+                    {
+                        <p class="preparedness-info">Snow Preparedness: @GetPreparednessLabel(currentGeography.PreparednessIndex) @GetPreparednessEmoji(currentGeography.PreparednessIndex)</p>
+                    }
                 }
                 @if (activeAlerts.Any(a => !a.Headline.StartsWith("Historical:")))
                 {
@@ -200,6 +204,7 @@
     private const int MaxSavedLocations = 10;
     private string appVersion = "";
     private List<WeatherAlert> activeAlerts = new();
+    private GeographyContext? currentGeography = null;
 
     // Cache management
     private string? cachedZipCode = null;
@@ -251,6 +256,20 @@
 
         [System.Text.Json.Serialization.JsonPropertyName("buildDate")]
         public string BuildDate { get; set; } = "";
+    }
+
+    private string GetPreparednessLabel(double p)
+    {
+        if (p < 0.30) return "Low";
+        if (p < 0.55) return "Moderate";
+        return "High";
+    }
+
+    private string GetPreparednessEmoji(double p)
+    {
+        if (p < 0.30) return "🟥";
+        if (p < 0.55) return "🟨";
+        return "🟩";
     }
 
     private async Task RefreshForecast()
@@ -434,6 +453,7 @@
             {
                 geography.AvgAnnualSnowfall = climateData.AvgAnnualSnowfall;
             }
+            currentGeography = geography;
 
             // Step 4: Get historical weather data (last 3 days)
             loadingStatus = "Getting recent weather history...";
@@ -607,6 +627,7 @@
                 {
                     geography.AvgAnnualSnowfall = climateData.AvgAnnualSnowfall;
                 }
+                currentGeography = geography;
 
                 // Get historical weather data (last 3 days)
                 loadingStatus = "Getting recent weather history...";

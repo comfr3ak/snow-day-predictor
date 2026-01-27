@@ -113,3 +113,10 @@ code {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+
+.preparedness-info {
+    font-size: 0.9rem;
+    color: #6c757d;
+    margin-top: -0.5rem;
+    margin-bottom: 0.5rem;
+}
