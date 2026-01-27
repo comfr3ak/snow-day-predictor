@@ -1,8 +1,8 @@
 self.assetsManifest = {
-  "version": "DeDh3EAd",
+  "version": "RKhSBw/H",
   "assets": [
     {
-      "hash": "sha256-QmVzS2lKQ0Yl8elgCQkAaWeFJBemO162DCAWxXTVREY=",
+      "hash": "sha256-0fhmaTX9hBm5cqyEuj3hmkZifRsEe3tn7tmHAEa6jd0=",
       "url": "404.html"
     },
     {
@@ -70,8 +70,8 @@ self.assetsManifest = {
       "url": "_framework/Microsoft.JSInterop.betqyv1awt.wasm"
     },
     {
-      "hash": "sha256-E8NFeyxl4abFgbFlWf8655rzi9xKsXmZIttUterdCik=",
-      "url": "_framework/SnowDayPredictor.h7u08vcoo0.wasm"
+      "hash": "sha256-hRrQvr9QagLJZgBxG62f3hDjpcnumx28KNYxG6x90JQ=",
+      "url": "_framework/SnowDayPredictor.7lk9934hwt.wasm"
     },
     {
       "hash": "sha256-KdNyHv0nKivu9Fe5zLs6hNLhy4tsA9jfCT4NkD/r4mU=",
@@ -158,6 +158,10 @@ self.assetsManifest = {
       "url": "_framework/blazor.webassembly.66stpp682q.js"
     },
     {
+      "hash": "sha256-x/3lFeVFeB8LWUoqDCa7G0m+GlI8nTK5xJEtkeOqRWc=",
+      "url": "_framework/dotnet.jp7zkqrcei.js"
+    },
+    {
       "hash": "sha256-zE11fbcG2CeLl1Zi+NJgMOfWpdjuUWNte+icrtAO58I=",
       "url": "_framework/dotnet.native.87vtjjdetb.js"
     },
@@ -168,10 +172,6 @@ self.assetsManifest = {
     {
       "hash": "sha256-2lZh9yO0fnzm3Xt7yV+Kox3DH3nK7L8hDhm84VT1xco=",
       "url": "_framework/dotnet.runtime.2tx45g8lli.js"
-    },
-    {
-      "hash": "sha256-NFCg3DTpDJfqjtwH6WcDCWwy7EQXJ3xBem8YMYP8Ry8=",
-      "url": "_framework/dotnet.swjgfuwd5l.js"
     },
     {
       "hash": "sha256-SZLtQnRc0JkwqHab0VUVP7T3uBPSeYzxzDnpxPpUnHk=",
@@ -186,7 +186,7 @@ self.assetsManifest = {
       "url": "_framework/icudt_no_CJK.lfu7j35m59.dat"
     },
     {
-      "hash": "sha256-ZMLZ7kpQKP/K2SGsZY6zcCoAySC8OClFVp9NRZDsGBc=",
+      "hash": "sha256-6G40gN6zrsQywHgVsXS/A+JQbU0jC06RX6bNeZ2aZ8I=",
       "url": "css/app.css"
     },
     {
@@ -202,7 +202,7 @@ self.assetsManifest = {
       "url": "icon-512.png"
     },
     {
-      "hash": "sha256-/4xd969/yWkfocwOhEkpIFa+2AEcjJ5zx3wNRGfJK6o=",
+      "hash": "sha256-i0gxutBgQuZsCdX+uoat44e0ajzQHdv+6+0lL5fGPkI=",
       "url": "index.html"
     },
     {
