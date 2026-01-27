@@ -151,16 +151,18 @@
 
         /// <summary>
         /// How many inches of snow typically trigger closures.
-        /// Lower preparedness = lower threshold
+        /// Scale directly with annual snowfall for better accuracy.
         /// </summary>
         public double ClosureThresholdInches
         {
             get
             {
-                // Unprepared (0.0): 1" triggers closures
-                // Mid-prepared (0.5): 3" triggers closures
-                // Very prepared (1.0): 6" triggers closures
-                return 1.0 + (PreparednessIndex * 5.0);
+                // Scale threshold directly with annual snowfall
+                // 0" annual → 1" triggers closures (no equipment, any snow causes panic)
+                // 30" annual → 5" triggers closures (moderate equipment)
+                // 60" annual → 9" triggers closures (well-equipped)
+                // 100" annual → ~14" triggers closures (very well-equipped, like Buffalo)
+                return 1.0 + (AvgAnnualSnowfall / 7.5);
             }
         }
 
