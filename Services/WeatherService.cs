@@ -419,11 +419,17 @@ namespace SnowDayPredictor.Services
             }
 
             // FIRST PASS: Extract snow AND ICE amounts from ALL days to build winter event history
+            // NOTE: Only track PAST and TODAY events for history - future forecasted events
+            // are used for direct probability calculations, not aftermath
             Console.WriteLine("\n=== FIRST PASS: Building winter event history ===");
             foreach (var period in allDailyPeriods)
             {
                 var nightPeriod = periods.FirstOrDefault(p =>
                     p.StartTime.Date == period.StartTime.Date && !p.IsDaytime);
+
+                // IMPORTANT: Only add to winter event history if date is today or in the past
+                // Future forecasted snow should NOT appear in history
+                bool isPastOrToday = period.StartTime.Date <= DateTime.Today;
 
                 double snowAmount = ExtractSnowAmount(period, nightPeriod);
                 double iceAmount = ExtractIceAmount(period, nightPeriod);
@@ -437,26 +443,30 @@ namespace SnowDayPredictor.Services
                     // Only classify as ice if ice is PRIMARY component (ice effect > snow)
                     bool isIceEvent = iceAmount >= 0.05 && (iceAmount * 3.0) > snowAmount;
 
-                    winterEvents[period.StartTime.Date] = new WinterEvent
+                    if (isPastOrToday)
                     {
-                        EffectiveAmount = effectiveAmount,
-                        IsIceEvent = isIceEvent,
-                        OriginalIceAmount = iceAmount
-                    };
+                        winterEvents[period.StartTime.Date] = new WinterEvent
+                        {
+                            EffectiveAmount = effectiveAmount,
+                            IsIceEvent = isIceEvent,
+                            OriginalIceAmount = iceAmount
+                        };
+                    }
 
                     if (isIceEvent)
                     {
-                        Console.WriteLine($"{period.Name} ({period.StartTime.Date:MM/dd}): {iceAmount:F2}\" ice ({effectiveAmount:F2}\" effective) - TRACKED");
+                        Console.WriteLine($"{period.Name} ({period.StartTime.Date:MM/dd}): {iceAmount:F2}\" ice ({effectiveAmount:F2}\" effective) - {(isPastOrToday ? "TRACKED" : "FUTURE")}");
                     }
                     else
                     {
-                        Console.WriteLine($"{period.Name} ({period.StartTime.Date:MM/dd}): {snowAmount:F1}\" snow ({effectiveAmount:F2}\" effective) - TRACKED");
+                        Console.WriteLine($"{period.Name} ({period.StartTime.Date:MM/dd}): {snowAmount:F1}\" snow ({effectiveAmount:F2}\" effective) - {(isPastOrToday ? "TRACKED" : "FUTURE")}");
                     }
                 }
-                else
+                else if (isPastOrToday)
                 {
                     // NEW: Check for keyword-based snow events (no explicit amounts but snow in forecast)
                     // This ensures aftermath logic works for days following keyword-based forecasts
+                    // Only track for past/today - future keyword estimates are too unreliable for history
                     var keywordSnow = EstimateSnowFromKeywords(period, nightPeriod);
                     if (keywordSnow > 0)
                     {
@@ -812,12 +822,14 @@ namespace SnowDayPredictor.Services
                     double day56Threshold = climate.ClosureThresholdInches;
                     double day56RawRatio = evt.EffectiveAmount / day56Threshold;
 
-                    // Only apply to major events (>2x threshold = significant storm)
-                    if (day56RawRatio >= 2.0)
+                    // Apply to significant events (>1.5x threshold)
+                    // Side roads and bus routes may still be icy 5-6 days after a significant storm
+                    if (day56RawRatio >= 1.5)
                     {
                         double day56BaseProb;
                         if (day56RawRatio >= 2.5) day56BaseProb = 98.0 * day56PrepFactor;
                         else if (day56RawRatio >= 2.0) day56BaseProb = 95.0 * day56PrepFactor;
+                        else if (day56RawRatio >= 1.5) day56BaseProb = 85.0 * day56PrepFactor;
                         else day56BaseProb = 70.0 * day56PrepFactor;
 
                         day56BaseProb = Math.Min(100, day56BaseProb);
