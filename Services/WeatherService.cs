@@ -879,6 +879,37 @@ namespace SnowDayPredictor.Services
                 else baseProb = 30.0 * prepFactor;
 
                 baseProb = Math.Min(100, baseProb);
+
+                // ALERT SEVERITY BOOST: If there was a severe alert for this event date,
+                // ensure baseProb has a minimum floor (our ice/snow estimates may be low)
+                var eventDate = winterEvent.Key;
+                var severeAlertForEvent = alerts.FirstOrDefault(a =>
+                {
+                    var alertStart = a.Onset ?? a.Ends?.AddDays(-2) ?? eventDate;
+                    var alertEnd = a.Ends ?? a.Expires ?? eventDate.AddDays(1);
+                    bool coversDate = eventDate >= alertStart.Date && eventDate <= alertEnd.Date;
+                    bool isSevere = a.Type.Contains("Ice Storm") ||
+                                    a.Type.Contains("Blizzard") ||
+                                    a.Type.Contains("Winter Storm Warning");
+                    return coversDate && isSevere;
+                });
+
+                if (severeAlertForEvent != null)
+                {
+                    // Severe alerts indicate significant events - apply minimum floor
+                    double alertMinBase = severeAlertForEvent.Type.Contains("Ice Storm") ||
+                                          severeAlertForEvent.Type.Contains("Blizzard")
+                                          ? 80.0 * prepFactor   // Ice Storm/Blizzard: 80% floor
+                                          : 70.0 * prepFactor;  // Winter Storm Warning: 70% floor
+                    alertMinBase = Math.Min(100, alertMinBase);  // Cap at 100
+
+                    if (alertMinBase > baseProb)
+                    {
+                        Console.WriteLine($"      Alert boost ({severeAlertForEvent.Type}): {baseProb:F1}% → {alertMinBase:F1}%");
+                        baseProb = alertMinBase;
+                    }
+                }
+
                 Console.WriteLine($"      Base prob: {baseProb:F1}%");
 
                 // ========================================================================
