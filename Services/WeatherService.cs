@@ -951,9 +951,9 @@ namespace SnowDayPredictor.Services
                     else
                     {
                         // Ice melts above 32°F, but low-prep areas recover slower
-                        // High-prep: 0.66 decay (clear roads when melting)
-                        // Low-prep: 0.85 decay (can't clear even when melting - takes 5+ days)
-                        double iceFastDecay = 0.65 + (0.20 * (1.0 - climate.PreparednessIndex));
+                        // High-prep: 0.52 decay (clear roads when melting)
+                        // Low-prep: 0.81 decay (can't clear even when melting - takes 5+ days)
+                        double iceFastDecay = 0.50 + (0.38 * (1.0 - climate.PreparednessIndex));
                         finalProb = baseProb * Math.Pow(iceFastDecay, daysSince);
                         Console.WriteLine($"      ICE Day {daysSince} melting ({temperature}°F, decay={iceFastDecay:F2}): {finalProb:F1}%");
                     }
