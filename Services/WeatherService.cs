@@ -480,7 +480,7 @@ namespace SnowDayPredictor.Services
             foreach (var alert in historicalAlerts)
             {
                 // Use the alert's onset date as the event date (when the storm started)
-                var eventDate = (alert.Onset ?? alert.Effective ?? DateTime.Today.AddDays(-1)).Date;
+                var eventDate = (alert.Onset ?? DateTime.Today.AddDays(-1)).Date;
 
                 // Only process if within our lookback window (7 days)
                 var daysSince = (DateTime.Today - eventDate).Days;
@@ -1677,7 +1677,7 @@ namespace SnowDayPredictor.Services
             {
                 // Use Ends if available, otherwise Expires
                 var endDate = a.Ends ?? a.Expires;
-                var startDate = a.Onset ?? a.Effective;
+                var startDate = a.Onset;
 
                 // If no end date, assume alert is for today/tomorrow only
                 if (!endDate.HasValue)
