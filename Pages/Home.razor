@@ -74,51 +74,58 @@
 
         @if (forecasts != null && forecasts.Any())
         {
-            <div class="forecast-title">
-                <h3>7-Day Snow Day Forecast</h3>
-                @if (!string.IsNullOrEmpty(currentCityName))
-                {
-                    <p class="location-name">📍 @currentCityName</p>
-                    @if (currentGeography != null)
-                    {
-                        <p class="preparedness-info">Snow Preparedness: @GetPreparednessLabel(currentGeography.PreparednessIndex) @GetPreparednessEmoji(currentGeography.PreparednessIndex)</p>
-                    }
-                }
-                @if (activeAlerts.Any(a => !a.Headline.StartsWith("Historical:")))
-                {
-                    <div class="alerts-section">
-                        @foreach (var alert in activeAlerts.Where(a => !a.Headline.StartsWith("Historical:")))
-                        {
-                            var alertClass = alert.Severity switch
-                            {
-                                AlertSeverity.Extreme => "alert-extreme",
-                                AlertSeverity.Warning => "alert-warning",
-                                AlertSeverity.Watch => "alert-watch",
-                                _ => "alert-advisory"
-                            };
+            <h3 class="forecast-title-header">7-Day Snow Day Forecast</h3>
 
-                            <div class="weather-alert @alertClass">
-                                <div class="alert-icon">⚠️</div>
-                                <div class="alert-content">
-                                    <div class="alert-title">@alert.Type</div>
-                                    <div class="alert-headline">@alert.Headline</div>
-                                    @if (alert.Expires.HasValue)
-                                    {
-                                        <div class="alert-expires">Until @alert.Expires.Value.ToString("ddd, MMM dd h:mm tt")</div>
-                                    }
+            @if (!string.IsNullOrEmpty(currentCityName))
+            {
+                <div class="location-info-card">
+                    <div class="location-info-main">
+                        <div class="location-name-large">📍 @currentCityName</div>
+                        @if (currentGeography != null)
+                        {
+                            <div class="location-details">
+                                <div class="location-detail-row">
+                                    <span>❄️ Snow Prep: @GetPreparednessLabel(currentGeography.PreparednessIndex) @GetPreparednessEmoji(currentGeography.PreparednessIndex)</span>
                                 </div>
+                                <div class="location-detail-row">
+                                    <span>📏 Annual Snowfall: @currentGeography.AvgAnnualSnowfall"</span>
+                                </div>
+                                <div class="location-badge">@GetPreparednessBadge(currentGeography.PreparednessIndex, currentGeography.AvgAnnualSnowfall)</div>
                             </div>
                         }
                     </div>
-                }
-            </div>
+                    @if (cacheTime.HasValue)
+                    {
+                        <div class="location-updated">Updated: @cacheTime.Value.ToString("h:mm tt")</div>
+                    }
+                </div>
+            }
 
-            @if (cacheTime.HasValue)
+            @if (activeAlerts.Any(a => !a.Headline.StartsWith("Historical:")))
             {
-                <div class="last-updated">
-                    Updated: @cacheTime.Value.ToString("h:mm tt")
-                    <br />
-                    <small class="text-muted">Cached for 5 min</small>
+                <div class="alerts-section">
+                    @foreach (var alert in activeAlerts.Where(a => !a.Headline.StartsWith("Historical:")))
+                    {
+                        var alertClass = alert.Severity switch
+                        {
+                            AlertSeverity.Extreme => "alert-extreme",
+                            AlertSeverity.Warning => "alert-warning",
+                            AlertSeverity.Watch => "alert-watch",
+                            _ => "alert-advisory"
+                        };
+
+                        <div class="weather-alert @alertClass">
+                            <div class="alert-icon">⚠️</div>
+                            <div class="alert-content">
+                                <div class="alert-title">@alert.Type</div>
+                                <div class="alert-headline">@alert.Headline</div>
+                                @if (alert.Expires.HasValue)
+                                {
+                                    <div class="alert-expires">Until @alert.Expires.Value.ToString("ddd, MMM dd h:mm tt")</div>
+                                }
+                            </div>
+                        </div>
+                    }
                 </div>
             }
 
@@ -274,6 +281,19 @@
         if (p < 0.30) return "🟥";
         if (p < 0.55) return "🟨";
         return "🟩";
+    }
+
+    private string GetPreparednessBadge(double p, double annualSnowfall)
+    {
+        // Lake effect / extreme snow areas
+        if (annualSnowfall >= 50 && p >= 0.90) return "🏆 Lake Effect Warriors";
+        if (annualSnowfall >= 40 && p >= 0.80) return "⛷️ Snow Belt Veterans";
+
+        // Standard prep levels
+        if (p >= 0.70) return "🌨️ Winter Ready";
+        if (p >= 0.50) return "❄️ Moderate Prep";
+        if (p >= 0.30) return "🧊 Snow Day Hopefuls";
+        return "🌴 Powder Panic Zone";
     }
 
     private async Task RefreshForecast()
@@ -831,18 +851,56 @@
             margin-bottom: 0.5rem;
         }
 
-    .forecast-title {
+    .forecast-title-header {
         margin-bottom: 1rem;
     }
 
-        .forecast-title h3 {
-            margin-bottom: 0.5rem;
-        }
+    .location-info-card {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border: 1px solid #dee2e6;
+        border-radius: 12px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
 
-    .location-name {
-        font-size: 1.1rem;
-        color: #666;
-        margin: 0;
+    .location-info-main {
+        flex: 1;
+    }
+
+    .location-name-large {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 0.5rem;
+    }
+
+    .location-details {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .location-detail-row {
+        font-size: 0.9rem;
+        color: #555;
+    }
+
+    .location-badge {
+        margin-top: 0.5rem;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #495057;
+    }
+
+    .location-updated {
+        font-size: 0.8rem;
+        color: #888;
+        text-align: right;
+        white-space: nowrap;
     }
 
     .container {
@@ -865,6 +923,16 @@
 
         .container {
             padding: 0.5rem;
+        }
+
+        .location-info-card {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+
+        .location-updated {
+            align-self: flex-end;
         }
     }
 
