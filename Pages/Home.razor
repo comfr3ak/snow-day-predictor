@@ -140,6 +140,7 @@
                     @if (closingsExpanded)
                     {
                         <div class="closings-list">
+                            <div class="closings-date">@DateTime.Now.ToString("ddd, MMM d, yyyy")</div>
                             @foreach (var closing in schoolClosings.Items.Take(10))
                             {
                                 <div class="closing-item">
@@ -1143,6 +1144,14 @@
 
     .closings-list {
         padding: 0.5rem 1rem 1rem;
+    }
+
+    .closings-date {
+        font-weight: 600;
+        color: #495057;
+        padding-bottom: 0.5rem;
+        margin-bottom: 0.25rem;
+        border-bottom: 1px solid #dce8f5;
     }
 
     .closing-item {
