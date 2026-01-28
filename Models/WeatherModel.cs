@@ -160,9 +160,19 @@
                 // Scale threshold directly with annual snowfall
                 // 0" annual → 1" triggers closures (no equipment, any snow causes panic)
                 // 30" annual → 5" triggers closures (moderate equipment)
-                // 60" annual → 9" triggers closures (well-equipped)
-                // 100" annual → ~14" triggers closures (very well-equipped, like Buffalo)
-                return 1.0 + (AvgAnnualSnowfall / 7.5);
+                // 60" annual → 12" triggers closures (well-equipped lake effect areas)
+                // 100" annual → ~21" triggers closures (very well-equipped, like Buffalo)
+                double baseThreshold = 1.0 + (AvgAnnualSnowfall / 7.5);
+
+                // Ultra-high-prep areas (50"+ annual) need steeper threshold increase
+                // These lake effect regions are so well-equipped they handle snow much better
+                if (AvgAnnualSnowfall > 50)
+                {
+                    double extraThreshold = (AvgAnnualSnowfall - 50) * 0.3;
+                    return baseThreshold + extraThreshold;
+                }
+
+                return baseThreshold;
             }
         }
 
