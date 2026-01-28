@@ -130,7 +130,7 @@ namespace SnowDayPredictor.Services
 
         /// <summary>
         /// Get school closings for a state/county (with short-term caching)
-        /// Filters to only school_district organizations
+        /// Filters to school_district and school organizations
         /// </summary>
         public async Task<ClosingsResponse?> GetSchoolClosingsAsync(string state, string county)
         {
@@ -188,9 +188,9 @@ namespace SnowDayPredictor.Services
 
                 if (response != null)
                 {
-                    // Filter to only school districts
+                    // Filter to schools and school districts
                     response.Items = response.Items
-                        .Where(i => i.OrganizationType == "school_district")
+                        .Where(i => i.OrganizationType == "school_district" || i.OrganizationType == "school")
                         .ToList();
                     response.Total = response.Items.Count;
 
