@@ -159,6 +159,10 @@
                         }
 
                         <div class="forecast-details">
+                            @if (!string.IsNullOrEmpty(forecast.Reasoning))
+                            {
+                                <div class="reasoning"><strong>Details:</strong> @forecast.Reasoning</div>
+                            }
                             <div><strong>Temperature:</strong> @forecast.Temperature°F</div>
                             <div><strong>Precipitation:</strong> @forecast.PrecipitationChance%</div>
                             @if (!string.IsNullOrEmpty(forecast.SnowfallAmount))
