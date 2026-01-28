@@ -147,6 +147,7 @@
                                         @closing.ClosureStatus
                                     </span>
                                     <span class="closing-name">@closing.OrganizationName</span>
+                                    <span class="closing-date">@FormatClosingDate(closing.EffectiveDate)</span>
                                 </div>
                             }
                             @if (schoolClosings.Total > 10)
@@ -333,6 +334,15 @@
         if (p >= 0.50) return "❄️ Moderate Prep";
         if (p >= 0.30) return "🧊 Snow Day Hopefuls";
         return "🌴 Powder Panic Zone";
+    }
+
+    private string FormatClosingDate(string effectiveDate)
+    {
+        if (DateTime.TryParse(effectiveDate, out var date))
+        {
+            return $"({date.Month}/{date.Day})";
+        }
+        return "";
     }
 
     private async Task RefreshForecast()
@@ -1143,6 +1153,12 @@
 
     .closings-list {
         padding: 0.5rem 1rem 1rem;
+    }
+
+    .closing-date {
+        color: #6c757d;
+        font-size: 0.85rem;
+        margin-left: auto;
     }
 
     .closing-item {

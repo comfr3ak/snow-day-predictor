@@ -130,7 +130,7 @@ namespace SnowDayPredictor.Services
 
         /// <summary>
         /// Get school closings for a state/county (with short-term caching)
-        /// Filters to only school_district organizations
+        /// Filters to school_district and school organizations
         /// </summary>
         public async Task<ClosingsResponse?> GetSchoolClosingsAsync(string state, string county)
         {
@@ -140,7 +140,11 @@ namespace SnowDayPredictor.Services
                 return null;
             }
 
-            var cacheKey = $"{ClosingsCacheKey}_{state}_{county}";
+            // Normalize state and county for consistent cache keys
+            var normalizedState = state.Trim().ToUpperInvariant();
+            var normalizedCounty = county.Trim().ToLowerInvariant().Replace(" ", "_");
+            var cacheKey = $"{ClosingsCacheKey}_{normalizedState}_{normalizedCounty}";
+            Console.WriteLine($"🔑 Closings cache key: {cacheKey}");
 
             // Try to get from localStorage cache first (10-minute cache)
             if (_jsRuntime != null)
@@ -184,9 +188,9 @@ namespace SnowDayPredictor.Services
 
                 if (response != null)
                 {
-                    // Filter to only school districts
+                    // Filter to schools and school districts
                     response.Items = response.Items
-                        .Where(i => i.OrganizationType == "school_district")
+                        .Where(i => i.OrganizationType == "school_district" || i.OrganizationType == "school")
                         .ToList();
                     response.Total = response.Items.Count;
 
