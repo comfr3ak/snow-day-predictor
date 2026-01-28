@@ -821,7 +821,9 @@ namespace SnowDayPredictor.Services
                 }
 
                 // SPECIAL: Snow events Day 5-6 can have delay-only aftermath (no closures)
-                if (!evt.IsIceEvent && daysSince >= 5 && daysSince <= 6)
+                // Only applies to low-prep areas with 4+ day closure periods
+                // High-prep areas (2-day period) are already clear by Day 3, so Day 5-6 makes no sense
+                if (!evt.IsIceEvent && daysSince >= 5 && daysSince <= 6 && climate.TypicalClosureDays >= 4)
                 {
                     // Calculate delay-only for Day 5-6 (roads clear enough to open, but buses slower)
                     double day56PrepFactor = 1.5 - climate.PreparednessIndex;
