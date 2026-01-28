@@ -230,6 +230,7 @@
         public string? SnowfallAmount { get; set; }
         public bool IsAftermathDay { get; set; }
         public int DaysSinceSnowEvent { get; set; }
+        public string? Reasoning { get; set; }
 
         public string ChanceLevel => SnowDayChance switch
         {

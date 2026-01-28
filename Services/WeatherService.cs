@@ -580,6 +580,11 @@ namespace SnowDayPredictor.Services
                 // Get snow description for display (range or keyword)
                 var snowDescription = GetSnowDescription(period, nightPeriod);
 
+                // Build reasoning string for UI
+                string? reasoning = BuildReasoningString(
+                    closureChance, isAftermath, daysSince, snowAmount, iceAmount,
+                    period.Temperature, climate, winterEvents, period.StartTime.Date, snowDescription);
+
                 forecasts.Add(new SnowDayForecast
                 {
                     DayName = period.Name,
@@ -592,7 +597,8 @@ namespace SnowDayPredictor.Services
                     PrecipitationChance = period.ProbabilityOfPrecipitation?.Value ?? 0,
                     SnowfallAmount = !string.IsNullOrEmpty(snowDescription) ? snowDescription : null,
                     IsAftermathDay = isAftermath,
-                    DaysSinceSnowEvent = daysSince
+                    DaysSinceSnowEvent = daysSince,
+                    Reasoning = reasoning
                 });
             }
 
@@ -1311,6 +1317,53 @@ namespace SnowDayPredictor.Services
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Build a concise reasoning string for the UI
+        /// </summary>
+        private string? BuildReasoningString(
+            int closureChance,
+            bool isAftermath,
+            int daysSince,
+            double snowAmount,
+            double iceAmount,
+            int temperature,
+            GeographyContext climate,
+            Dictionary<DateTime, WinterEvent> winterEvents,
+            DateTime date,
+            string? snowDescription)
+        {
+            if (closureChance == 0)
+                return null; // No reasoning needed for 0%
+
+            string prepLevel = climate.PreparednessIndex < 0.30 ? "low" :
+                               climate.PreparednessIndex < 0.55 ? "moderate" : "high";
+
+            if (isAftermath && daysSince > 0)
+            {
+                // Find the event that caused the aftermath
+                var eventDate = date.AddDays(-daysSince);
+                if (winterEvents.TryGetValue(eventDate, out var evt))
+                {
+                    string eventType = evt.IsIceEvent ? "Ice" : "Snow";
+                    string tempDesc = temperature <= 32 ? "still frozen" :
+                                     temperature <= 36 ? "barely melting" :
+                                     temperature <= 42 ? "slowly melting" : "melting";
+                    return $"{eventType} event {daysSince}d ago, {temperature}°F ({tempDesc}), {prepLevel} prep area";
+                }
+                return $"Winter event {daysSince}d ago, {temperature}°F, {prepLevel} prep area";
+            }
+
+            if (snowAmount > 0 || iceAmount > 0)
+            {
+                string amounts = iceAmount > 0 ? $"{iceAmount:F1}\" ice" :
+                                snowDescription ?? $"{snowAmount:F1}\" snow";
+                return $"Expected {amounts}, {prepLevel} prep area";
+            }
+
+            // Keyword-based forecast
+            return $"Winter weather forecast, {prepLevel} prep area";
         }
 
         /// <summary>
