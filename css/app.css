@@ -119,3 +119,10 @@ code {
     color: #6c757d;
     margin-bottom: 0.5rem;
 }
+
+.reasoning {
+    font-size: 0.85rem;
+    color: #5a6268;
+    font-style: italic;
+    margin-bottom: 0.25rem;
+}
