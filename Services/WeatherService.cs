@@ -188,9 +188,11 @@ namespace SnowDayPredictor.Services
 
                 if (response != null)
                 {
-                    // Filter to schools and school districts
+                    // Filter to schools and school districts, today or future only
+                    var today = DateTime.Today;
                     response.Items = response.Items
                         .Where(i => i.OrganizationType == "school_district" || i.OrganizationType == "school")
+                        .Where(i => !DateTime.TryParse(i.EffectiveDate, out var date) || date >= today)
                         .ToList();
                     response.Total = response.Items.Count;
 

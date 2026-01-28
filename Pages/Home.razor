@@ -101,34 +101,6 @@
                 </div>
             }
 
-            @if (activeAlerts.Any(a => !a.Headline.StartsWith("Historical:")))
-            {
-                <div class="alerts-section">
-                    @foreach (var alert in activeAlerts.Where(a => !a.Headline.StartsWith("Historical:")))
-                    {
-                        var alertClass = alert.Severity switch
-                        {
-                            AlertSeverity.Extreme => "alert-extreme",
-                            AlertSeverity.Warning => "alert-warning",
-                            AlertSeverity.Watch => "alert-watch",
-                            _ => "alert-advisory"
-                        };
-
-                        <div class="weather-alert @alertClass">
-                            <div class="alert-icon">⚠️</div>
-                            <div class="alert-content">
-                                <div class="alert-title">@alert.Type</div>
-                                <div class="alert-headline">@alert.Headline</div>
-                                @if (alert.Expires.HasValue)
-                                {
-                                    <div class="alert-expires">Until @alert.Expires.Value.ToString("ddd, MMM dd h:mm tt")</div>
-                                }
-                            </div>
-                        </div>
-                    }
-                </div>
-            }
-
             @if (schoolClosings != null && schoolClosings.Total > 0)
             {
                 <div class="closings-section">
@@ -162,6 +134,34 @@
                                     <a href="@schoolClosings.Source.Url" target="_blank" rel="noopener">Source: @schoolClosings.Source.Name</a>
                                 </div>
                             }
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (activeAlerts.Any(a => !a.Headline.StartsWith("Historical:")))
+            {
+                <div class="alerts-section">
+                    @foreach (var alert in activeAlerts.Where(a => !a.Headline.StartsWith("Historical:")))
+                    {
+                        var alertClass = alert.Severity switch
+                        {
+                            AlertSeverity.Extreme => "alert-extreme",
+                            AlertSeverity.Warning => "alert-warning",
+                            AlertSeverity.Watch => "alert-watch",
+                            _ => "alert-advisory"
+                        };
+
+                        <div class="weather-alert @alertClass">
+                            <div class="alert-icon">⚠️</div>
+                            <div class="alert-content">
+                                <div class="alert-title">@alert.Type</div>
+                                <div class="alert-headline">@alert.Headline</div>
+                                @if (alert.Expires.HasValue)
+                                {
+                                    <div class="alert-expires">Until @alert.Expires.Value.ToString("ddd, MMM dd h:mm tt")</div>
+                                }
+                            </div>
                         </div>
                     }
                 </div>
