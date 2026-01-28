@@ -129,6 +129,43 @@
                 </div>
             }
 
+            @if (schoolClosings != null && schoolClosings.Total > 0)
+            {
+                <div class="closings-section">
+                    <div class="closings-header" @onclick="() => closingsExpanded = !closingsExpanded">
+                        <span class="closings-icon">🏫</span>
+                        <span class="closings-title">@schoolClosings.Total School Closing@(schoolClosings.Total == 1 ? "" : "s") in @currentGeography?.County County</span>
+                        <span class="closings-toggle">@(closingsExpanded ? "▲" : "▼")</span>
+                    </div>
+                    @if (closingsExpanded)
+                    {
+                        <div class="closings-list">
+                            @foreach (var closing in schoolClosings.Items.Take(10))
+                            {
+                                <div class="closing-item">
+                                    <span class="closing-status @(closing.ClosureType == "closed" ? "status-closed" : "status-delay")">
+                                        @closing.ClosureStatus
+                                    </span>
+                                    <span class="closing-name">@closing.OrganizationName</span>
+                                </div>
+                            }
+                            @if (schoolClosings.Total > 10)
+                            {
+                                <div class="closing-item closing-more">
+                                    ... and @(schoolClosings.Total - 10) more
+                                </div>
+                            }
+                            @if (schoolClosings.Source != null)
+                            {
+                                <div class="closings-source">
+                                    <a href="@schoolClosings.Source.Url" target="_blank" rel="noopener">Source: @schoolClosings.Source.Name</a>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
             <div class="forecast-container">
                 @foreach (var forecast in forecasts)
                 {
@@ -216,6 +253,8 @@
     private string appVersion = "";
     private List<WeatherAlert> activeAlerts = new();
     private GeographyContext? currentGeography = null;
+    private ClosingsResponse? schoolClosings = null;
+    private bool closingsExpanded = false;
 
     // Cache management
     private string? cachedZipCode = null;
@@ -453,7 +492,7 @@
             loadingStatus = "Getting weather forecast...";
             StateHasChanged();
 
-            var (weatherData, nwsCity, nwsState, wfoCode) = await WeatherService.GetWeatherForecast(coords.Value.lat, coords.Value.lon);
+            var (weatherData, nwsCity, nwsState, wfoCode, countyName) = await WeatherService.GetWeatherForecast(coords.Value.lat, coords.Value.lon);
             if (weatherData == null)
             {
                 errorMessage = "Could not retrieve weather data. The National Weather Service API may be temporarily unavailable.";
@@ -467,6 +506,7 @@
             var geography = new GeographyContext
             {
                 State = stateName, // Use state from ZIP lookup
+                County = countyName, // County from NWS
                 Latitude = coords.Value.lat,
                 Longitude = coords.Value.lon
             };
@@ -548,6 +588,20 @@
                 }
             }
 
+            // Step 5c: Get school closings (if we have county data)
+            if (!string.IsNullOrEmpty(geography.County) && !string.IsNullOrEmpty(geography.State))
+            {
+                loadingStatus = "Checking school closings...";
+                StateHasChanged();
+
+                schoolClosings = await WeatherService.GetSchoolClosingsAsync(geography.State, geography.County);
+                closingsExpanded = false; // Reset expansion state
+            }
+            else
+            {
+                schoolClosings = null;
+            }
+
             // Step 6: Calculate snow day chances WITH historical context AND alerts
             loadingStatus = "Calculating snow day probabilities...";
             StateHasChanged();
@@ -627,7 +681,7 @@
                 loadingStatus = "Getting weather forecast...";
                 StateHasChanged();
 
-                var (weatherData, nwsCity, nwsState, wfoCode) = await WeatherService.GetWeatherForecast(position.Latitude, position.Longitude);
+                var (weatherData, nwsCity, nwsState, wfoCode, countyName) = await WeatherService.GetWeatherForecast(position.Latitude, position.Longitude);
                 if (weatherData == null)
                 {
                     errorMessage = "Could not retrieve weather data for your location.";
@@ -641,6 +695,7 @@
                 var geography = new GeographyContext
                 {
                     State = state,
+                    County = countyName, // County from NWS
                     Latitude = position.Latitude,
                     Longitude = position.Longitude
                 };
@@ -704,6 +759,20 @@
                             Console.WriteLine($"Added historical alert: {histAlert.Type} ({histAlert.Onset:MM/dd})");
                         }
                     }
+                }
+
+                // Get school closings (if we have county data)
+                if (!string.IsNullOrEmpty(geography.County) && !string.IsNullOrEmpty(geography.State))
+                {
+                    loadingStatus = "Checking school closings...";
+                    StateHasChanged();
+
+                    schoolClosings = await WeatherService.GetSchoolClosingsAsync(geography.State, geography.County);
+                    closingsExpanded = false;
+                }
+                else
+                {
+                    schoolClosings = null;
                 }
 
                 // Calculate snow day chances
@@ -1032,6 +1101,105 @@
 
     .alerts-section {
         margin: 1rem 0;
+    }
+
+    .closings-section {
+        margin: 1rem 0;
+        background: #f0f7ff;
+        border: 1px solid #b3d4fc;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .closings-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1rem;
+        cursor: pointer;
+        user-select: none;
+        background: #e3f0ff;
+        transition: background 0.2s;
+    }
+
+    .closings-header:hover {
+        background: #d4e8ff;
+    }
+
+    .closings-icon {
+        font-size: 1.25rem;
+    }
+
+    .closings-title {
+        flex: 1;
+        font-weight: 600;
+        color: #1565c0;
+    }
+
+    .closings-toggle {
+        color: #666;
+        font-size: 0.8rem;
+    }
+
+    .closings-list {
+        padding: 0.5rem 1rem 1rem;
+    }
+
+    .closing-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid #dce8f5;
+    }
+
+    .closing-item:last-child {
+        border-bottom: none;
+    }
+
+    .closing-status {
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+
+    .status-closed {
+        background: #ffebee;
+        color: #c62828;
+    }
+
+    .status-delay {
+        background: #fff3e0;
+        color: #e65100;
+    }
+
+    .closing-name {
+        font-size: 0.9rem;
+        color: #333;
+    }
+
+    .closing-more {
+        font-style: italic;
+        color: #666;
+    }
+
+    .closings-source {
+        margin-top: 0.75rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid #dce8f5;
+        font-size: 0.8rem;
+    }
+
+    .closings-source a {
+        color: #1565c0;
+        text-decoration: none;
+    }
+
+    .closings-source a:hover {
+        text-decoration: underline;
     }
 
     .weather-alert {

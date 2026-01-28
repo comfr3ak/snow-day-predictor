@@ -10,9 +10,11 @@ namespace SnowDayPredictor.Services
         private readonly HttpClient _httpClient;
         private readonly IJSRuntime? _jsRuntime;
         private const string CloudflareWorkerUrl = "https://snow-day-climate-proxy.ncs-cee.workers.dev";
+        private const string ClosingsApiUrl = "https://closings-delays.ncs-cee.workers.dev/api/closings";
         private const string ClimateDataCacheKey = "climateDataCache";
         private const string HistoricalWeatherCacheKey = "historicalWeatherCache";
         private const string ZipLookupCacheKey = "zipLookupCache";
+        private const string ClosingsCacheKey = "closingsCache";
 
         public WeatherService(HttpClient httpClient)
         {
@@ -124,6 +126,93 @@ namespace SnowDayPredictor.Services
             if (lat < 43) return 40;
             if (lat < 47) return 60;
             return 80;
+        }
+
+        /// <summary>
+        /// Get school closings for a state/county (with short-term caching)
+        /// Filters to only school_district organizations
+        /// </summary>
+        public async Task<ClosingsResponse?> GetSchoolClosingsAsync(string state, string county)
+        {
+            if (string.IsNullOrEmpty(state) || string.IsNullOrEmpty(county))
+            {
+                Console.WriteLine("⚠️ Cannot fetch closings: missing state or county");
+                return null;
+            }
+
+            var cacheKey = $"{ClosingsCacheKey}_{state}_{county}";
+
+            // Try to get from localStorage cache first (10-minute cache)
+            if (_jsRuntime != null)
+            {
+                try
+                {
+                    var cachedJson = await _jsRuntime.InvokeAsync<string>("localStorage.getItem", cacheKey);
+                    var cacheTimeKey = $"{cacheKey}_time";
+                    var cacheTimeStr = await _jsRuntime.InvokeAsync<string>("localStorage.getItem", cacheTimeKey);
+
+                    if (!string.IsNullOrEmpty(cachedJson) && !string.IsNullOrEmpty(cacheTimeStr))
+                    {
+                        if (DateTime.TryParse(cacheTimeStr, out var cacheTime))
+                        {
+                            var age = DateTime.Now - cacheTime;
+                            if (age.TotalMinutes < 10) // 10-minute cache
+                            {
+                                var cached = System.Text.Json.JsonSerializer.Deserialize<ClosingsResponse>(cachedJson);
+                                if (cached != null)
+                                {
+                                    Console.WriteLine($"Using cached closings data for {state}/{county} (age: {age.TotalMinutes:F0} min)");
+                                    return cached;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error reading closings cache: {ex.Message}");
+                }
+            }
+
+            // Fetch from API
+            try
+            {
+                var url = $"{ClosingsApiUrl}?state={Uri.EscapeDataString(state)}&county={Uri.EscapeDataString(county)}";
+                Console.WriteLine($"🏫 Fetching school closings from: {url}");
+
+                var response = await _httpClient.GetFromJsonAsync<ClosingsResponse>(url);
+
+                if (response != null)
+                {
+                    // Filter to only school districts
+                    response.Items = response.Items
+                        .Where(i => i.OrganizationType == "school_district")
+                        .ToList();
+                    response.Total = response.Items.Count;
+
+                    Console.WriteLine($"✅ Found {response.Total} school closings in {county}, {state}");
+
+                    // Cache the result
+                    if (_jsRuntime != null)
+                    {
+                        try
+                        {
+                            var json = System.Text.Json.JsonSerializer.Serialize(response);
+                            await _jsRuntime.InvokeVoidAsync("localStorage.setItem", cacheKey, json);
+                            await _jsRuntime.InvokeVoidAsync("localStorage.setItem", $"{cacheKey}_time", DateTime.Now.ToString("o"));
+                        }
+                        catch { }
+                    }
+
+                    return response;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Closings fetch failed: {ex.Message}");
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -1896,9 +1985,58 @@ namespace SnowDayPredictor.Services
         }
 
         /// <summary>
+        /// Get county name from NWS zone URL (with caching)
+        /// </summary>
+        private async Task<string> GetCountyNameFromZoneUrl(string zoneUrl)
+        {
+            if (string.IsNullOrEmpty(zoneUrl)) return "";
+
+            try
+            {
+                // Try to get from localStorage cache first
+                var cacheKey = $"countyZone_{zoneUrl.GetHashCode()}";
+                if (_jsRuntime != null)
+                {
+                    try
+                    {
+                        var cached = await _jsRuntime.InvokeAsync<string>("localStorage.getItem", cacheKey);
+                        if (!string.IsNullOrEmpty(cached))
+                        {
+                            Console.WriteLine($"Using cached county name: {cached}");
+                            return cached;
+                        }
+                    }
+                    catch { }
+                }
+
+                // Fetch from NWS
+                Console.WriteLine($"🔄 Fetching county name from: {zoneUrl}");
+                var response = await _httpClient.GetFromJsonAsync<NWSZoneResponse>(zoneUrl);
+                var countyName = response?.Properties?.Name ?? "";
+
+                if (!string.IsNullOrEmpty(countyName) && _jsRuntime != null)
+                {
+                    try
+                    {
+                        await _jsRuntime.InvokeVoidAsync("localStorage.setItem", cacheKey, countyName);
+                        Console.WriteLine($"✅ County name cached: {countyName}");
+                    }
+                    catch { }
+                }
+
+                return countyName;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ County fetch failed: {ex.Message}");
+                return "";
+            }
+        }
+
+        /// <summary>
         /// Get weather forecast from NWS - NO CACHING, always fresh API call
         /// </summary>
-        public async Task<(List<Period>? periods, string city, string state, string wfo)> GetWeatherForecast(double latitude, double longitude)
+        public async Task<(List<Period>? periods, string city, string state, string wfo, string county)> GetWeatherForecast(double latitude, double longitude)
         {
             try
             {
@@ -1911,12 +2049,16 @@ namespace SnowDayPredictor.Services
 
                 if (pointsResponse?.Properties == null)
                 {
-                    return (null, "", "", "");
+                    return (null, "", "", "", "");
                 }
 
                 var city = pointsResponse.Properties.RelativeLocation?.Properties?.City ?? "Unknown";
                 var state = pointsResponse.Properties.RelativeLocation?.Properties?.State ?? "";
                 var wfo = pointsResponse.Properties.Cwa ?? "";  // Weather Forecast Office code
+
+                // Get county name from zone URL
+                var countyUrl = pointsResponse.Properties.County ?? "";
+                var county = await GetCountyNameFromZoneUrl(countyUrl);
 
                 // Get forecast
                 var forecastUrl = pointsResponse.Properties.Forecast;
@@ -1925,16 +2067,16 @@ namespace SnowDayPredictor.Services
 
                 if (forecastResponse?.Properties?.Periods == null)
                 {
-                    return (null, city, state, wfo);
+                    return (null, city, state, wfo, county);
                 }
 
                 Console.WriteLine($"✅ FRESH FORECAST RECEIVED: {forecastResponse.Properties.Periods.Count} periods");
-                return (forecastResponse.Properties.Periods, city, state, wfo);
+                return (forecastResponse.Properties.Periods, city, state, wfo, county);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"❌ Weather forecast fetch failed: {ex.Message}");
-                return (null, "", "", "");
+                return (null, "", "", "", "");
             }
         }
 

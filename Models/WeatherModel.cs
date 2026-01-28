@@ -18,6 +18,7 @@
         public string Forecast { get; set; } = "";
         public string ForecastHourly { get; set; } = "";
         public string Cwa { get; set; } = "";  // NWS Weather Forecast Office code (e.g., "MEG", "FFC")
+        public string County { get; set; } = "";  // URL to county zone (e.g., "https://api.weather.gov/zones/county/NYC075")
         public RelativeLocation RelativeLocation { get; set; } = new();
     }
 
@@ -124,6 +125,7 @@
     public class GeographyContext
     {
         public string State { get; set; } = "";
+        public string County { get; set; } = "";  // County name (e.g., "Oswego")
         public double Latitude { get; set; }
         public double Longitude { get; set; }
         public double AvgAnnualSnowfall { get; set; }
@@ -376,5 +378,72 @@
 
         [System.Text.Json.Serialization.JsonPropertyName("product_issue")]
         public DateTime? ProductIssue { get; set; }
+    }
+
+    // NWS County Zone response (for getting county name from zone URL)
+    public class NWSZoneResponse
+    {
+        public NWSZoneProperties Properties { get; set; } = new();
+    }
+
+    public class NWSZoneProperties
+    {
+        public string Name { get; set; } = "";  // County name (e.g., "Oswego")
+        public string State { get; set; } = "";  // State abbreviation
+    }
+
+    // Closings API response models
+    public class ClosingsResponse
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("state")]
+        public string State { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("county")]
+        public string County { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("total")]
+        public int Total { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("items")]
+        public List<ClosingItem> Items { get; set; } = new();
+
+        [System.Text.Json.Serialization.JsonPropertyName("source")]
+        public ClosingsSource? Source { get; set; }
+    }
+
+    public class ClosingItem
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public string Id { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("organization_name")]
+        public string OrganizationName { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("organization_type")]
+        public string OrganizationType { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("closure_type")]
+        public string ClosureType { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("closure_status")]
+        public string ClosureStatus { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("raw_status_text")]
+        public string RawStatusText { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("effective_date")]
+        public string EffectiveDate { get; set; } = "";
+    }
+
+    public class ClosingsSource
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("name")]
+        public string Name { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("url")]
+        public string Url { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("cachedMinutes")]
+        public int CachedMinutes { get; set; }
     }
 }
