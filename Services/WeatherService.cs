@@ -140,7 +140,11 @@ namespace SnowDayPredictor.Services
                 return null;
             }
 
-            var cacheKey = $"{ClosingsCacheKey}_{state}_{county}";
+            // Normalize state and county for consistent cache keys
+            var normalizedState = state.Trim().ToUpperInvariant();
+            var normalizedCounty = county.Trim().ToLowerInvariant().Replace(" ", "_");
+            var cacheKey = $"{ClosingsCacheKey}_{normalizedState}_{normalizedCounty}";
+            Console.WriteLine($"🔑 Closings cache key: {cacheKey}");
 
             // Try to get from localStorage cache first (10-minute cache)
             if (_jsRuntime != null)
