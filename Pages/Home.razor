@@ -340,7 +340,11 @@
     {
         if (DateTime.TryParse(effectiveDate, out var date))
         {
-            return $"({date.Month}/{date.Day})";
+            // Only show date if it matches today
+            if (date.Date == DateTime.Today)
+            {
+                return $"({date.Month}/{date.Day})";
+            }
         }
         return "";
     }
