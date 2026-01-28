@@ -159,7 +159,7 @@
                         }
 
                         <div class="forecast-details">
-                            @if (!string.IsNullOrEmpty(forecast.Reasoning))
+                            @if (!string.IsNullOrEmpty(forecast.Reasoning) && forecast.Date.DayOfWeek != DayOfWeek.Saturday && forecast.Date.DayOfWeek != DayOfWeek.Sunday)
                             {
                                 <div class="reasoning"><strong>Details:</strong> @forecast.Reasoning</div>
                             }
