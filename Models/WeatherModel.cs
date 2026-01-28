@@ -200,14 +200,19 @@
 
         /// <summary>
         /// Temperature-based melt factor. How fast does snow melt?
-        /// Higher preparedness = better clearing even without melting
+        /// Proportional to degrees above freezing for more accurate modeling.
         /// </summary>
         public double GetMeltFactor(int tempF)
         {
-            if (tempF > 40) return 0.50;  // Fast melt
-            if (tempF > 32) return 0.30;  // Moderate melt
-            if (tempF > 25) return 0.10;  // Slow melt
-            return 0.0;                    // No melt, stays frozen
+            if (tempF <= 32) return 0.0;  // No melt at or below freezing
+
+            // Proportional melt: 0.03 per degree above 32°F, capped at 0.60
+            // 34°F → 0.06 (barely melting)
+            // 40°F → 0.24 (moderate melt)
+            // 45°F → 0.39 (significant melt)
+            // 52°F+ → 0.60 (fast melt, capped)
+            double degreesAbove = tempF - 32;
+            return Math.Min(0.60, degreesAbove * 0.03);
         }
     }
 
